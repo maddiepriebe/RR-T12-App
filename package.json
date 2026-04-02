@@ -1,0 +1,32 @@
+{
+  "name": "arel-underwriting",
+  "version": "1.0.0",
+  "description": "Arel Capital Underwriting Tools",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.82.0",
+    "@clerk/nextjs": "^7.0.8",
+    "@types/node": "^22.0.0",
+    "@types/react": "^18.3.1",
+    "@types/react-dom": "^18.3.1",
+    "autoprefixer": "^10.4.21",
+    "next": "^14.2.35",
+    "pdf-parse": "^1.1.1",
+    "postcss": "^8.5.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-dropzone": "^14.3.5",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.3",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/pdf-parse": "^1.1.5"
+  }
+}
