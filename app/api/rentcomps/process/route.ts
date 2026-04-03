@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callClaude, parseClaudeJSON } from "@/lib/anthropic";
-import { parsePDF, extractPageRange } from "@/lib/pdf-parser";
+import { extractPageRange } from "@/lib/pdf-parser";
 import type { RentCompsData, CompSummary, CompDetail } from "@/lib/schemas";
 
-// App Router: formData() reads the body stream directly — no Next.js body parser,
-// no hard-coded size limit. Large CoStar PDFs (15-20 MB) are supported.
-// maxDuration gives Vercel enough time for PDF parsing + multiple Claude calls.
+// PDF text is now extracted client-side; this route receives JSON { pages, subjectName }.
+// Text from a 17-20 MB CoStar PDF is ~100-400 KB — well within Vercel Hobby's 4.5 MB limit.
 export const dynamic = "force-dynamic";
-export const maxDuration = 60; // seconds (requires Vercel Pro for values > 10)
+export const maxDuration = 60; // seconds (requires Vercel Pro for > 10 s)
 
 const SUMMARY_SYSTEM_PROMPT = `You are a multifamily real estate analyst. Extract rent comp summary data from CoStar report text.
 
@@ -91,18 +90,14 @@ Rules:
 
 export async function POST(req: NextRequest) {
   try {
-    const formData = await req.formData();
-    const file = formData.get("file") as File | null;
-    const subjectName = (formData.get("subjectName") as string) || "";
+    const body = await req.json() as { pages?: string[]; subjectName?: string };
+    const pages = body.pages;
+    const subjectName = body.subjectName ?? "";
 
-    if (!file) {
-      return NextResponse.json({ error: "No file provided" }, { status: 400 });
+    if (!pages?.length) {
+      return NextResponse.json({ error: "No PDF text provided" }, { status: 400 });
     }
 
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const pdf = await parsePDF(buffer);
-
-    const { pages } = pdf;
     const totalPages = pages.length;
 
     // Step 1: Extract summary (scan first ~15 pages for summary tables)

@@ -39,7 +39,10 @@
       "Bash(GIT_DIR=/Users/madelinepriebe/.git/worktrees/adoring-joliot GIT_WORK_TREE=/Users/madelinepriebe/RR-T12-App/.claude/worktrees/adoring-joliot git add drizzle.config.ts)",
       "Bash(GIT_DIR=/Users/madelinepriebe/.git/worktrees/adoring-joliot GIT_WORK_TREE=/Users/madelinepriebe/RR-T12-App/.claude/worktrees/adoring-joliot git push origin claude/adoring-joliot:main)",
       "Bash(GIT_DIR=/Users/madelinepriebe/.git/worktrees/adoring-joliot GIT_WORK_TREE=/Users/madelinepriebe/RR-T12-App/.claude/worktrees/adoring-joliot git add tsconfig.json)",
-      "Bash(GIT_DIR=/Users/madelinepriebe/.git/worktrees/adoring-joliot GIT_WORK_TREE=/Users/madelinepriebe/RR-T12-App/.claude/worktrees/adoring-joliot git add app/properties/[id]/page.tsx app/rent-comps/page.tsx)"
+      "Bash(GIT_DIR=/Users/madelinepriebe/.git/worktrees/adoring-joliot GIT_WORK_TREE=/Users/madelinepriebe/RR-T12-App/.claude/worktrees/adoring-joliot git add app/properties/[id]/page.tsx app/rent-comps/page.tsx)",
+      "Bash(GIT_DIR=/Users/madelinepriebe/.git/worktrees/adoring-joliot GIT_WORK_TREE=/Users/madelinepriebe/RR-T12-App/.claude/worktrees/adoring-joliot git add app/api/properties/[id]/route.ts app/properties/[id]/page.tsx)",
+      "Bash(GIT_DIR=/Users/madelinepriebe/.git/worktrees/adoring-joliot GIT_WORK_TREE=/Users/madelinepriebe/RR-T12-App/.claude/worktrees/adoring-joliot git add app/api/rentcomps/process/route.ts app/rent-comps/page.tsx)",
+      "Bash(npm uninstall:*)"
     ]
   }
 }

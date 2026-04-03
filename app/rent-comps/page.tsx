@@ -9,13 +9,14 @@ import UnitMixDetail from "@/components/rentcomps/UnitMixDetail";
 import SubjectVsComps from "@/components/rentcomps/SubjectVsComps";
 import ProgressIndicator from "@/components/shared/ProgressIndicator";
 import type { RentCompsData } from "@/lib/schemas";
+import { extractPDFPages } from "@/lib/extract-pdf-client";
 
 type Status = "idle" | "processing" | "done" | "error";
 type StepStatus = "pending" | "active" | "done" | "error";
 type Tab = "summary" | "unitmix" | "comparison";
 
 const INITIAL_STEPS = [
-  { label: "Extracting PDF text", status: "pending" as StepStatus },
+  { label: "Reading PDF in browser", status: "pending" as StepStatus },
   { label: "Parsing comp summary table", status: "pending" as StepStatus },
   { label: "Extracting unit mix details", status: "pending" as StepStatus },
   { label: "Building analysis", status: "pending" as StepStatus },
@@ -61,15 +62,14 @@ function RentCompsPage() {
     setSteps(INITIAL_STEPS.map((s, i) => ({ ...s, status: i === 0 ? "active" : "pending" })));
 
     try {
-      const fd = new FormData();
-      fd.append("file", file);
-      if (subjectName) fd.append("subjectName", subjectName);
-
+      // Step 1: Extract text client-side — PDF binary never leaves the browser.
+      // Text from a 17-20 MB CoStar PDF is ~100-400 KB, well within Vercel limits.
       updateStep(0, "active");
+      const pages = await extractPDFPages(file);
+      updateStep(0, "done");
 
-      // The API handles the multi-step extraction
-      // We simulate progress steps while waiting
-      const progressTimer = setTimeout(() => updateStep(1, "active"), 3000);
+      // Step 2+3: Send only the text array to the API; simulate progress while waiting
+      updateStep(1, "active");
       const progressTimer2 = setTimeout(() => {
         updateStep(1, "done");
         updateStep(2, "active");
@@ -81,24 +81,21 @@ function RentCompsPage() {
 
       const res = await fetch("/api/rentcomps/process", {
         method: "POST",
-        body: fd,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pages, subjectName }),
       });
 
-      clearTimeout(progressTimer);
       clearTimeout(progressTimer2);
       clearTimeout(progressTimer3);
 
-      // Safely parse JSON — platform-level errors (413 Too Large, 504 Timeout)
-      // return plain text/HTML which would throw "Unexpected token" from .json()
+      // Safely parse — defensive against any unexpected non-JSON response
       const rawText = await res.text();
       let json: { success?: boolean; error?: string; data?: unknown };
       try {
         json = JSON.parse(rawText);
       } catch {
-        // The server returned non-JSON (e.g. Vercel 413 / 504 page)
         const statusHint =
-          res.status === 413 ? "File too large for current plan (max ~4.5 MB on Hobby)."
-          : res.status === 504 ? "Request timed out — try a smaller PDF."
+          res.status === 504 ? "Request timed out — try a smaller PDF."
           : `Server error ${res.status}.`;
         throw new Error(statusHint);
       }
