@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
 export async function POST(req: NextRequest) {
+  const t0 = Date.now();
   try {
     const body = await req.json() as { pages?: string[]; subjectName?: string };
     const pages = body.pages;
@@ -16,7 +17,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No PDF text provided" }, { status: 400 });
     }
 
+    const totalChars = pages.reduce((s: number, p: string) => s + p.length, 0);
+    console.log(
+      `[rentcomps/process] Received ${pages.length} pages, ${totalChars} chars. ` +
+      `Parsing started at +${Date.now() - t0}ms`
+    );
+
     const data = parseCoStarPages(pages, subjectName);
+
+    console.log(
+      `[rentcomps/process] Parsing done — ${data.comps.length} comps (incl. subject), ` +
+      `${data.compDetails.length} detail sections. Total time: ${Date.now() - t0}ms`
+    );
 
     if (!data.comps.length && !data.subjectProperty) {
       return NextResponse.json(
@@ -27,7 +39,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true, data });
   } catch (err) {
-    console.error("Rent comps processing error:", err);
+    console.error(`[rentcomps/process] Error after ${Date.now() - t0}ms:`, err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Processing failed" },
       { status: 500 }

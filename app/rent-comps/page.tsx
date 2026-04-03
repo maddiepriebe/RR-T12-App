@@ -64,11 +64,19 @@ function RentCompsPage() {
       // Step 1: Extract text client-side — PDF binary never leaves the browser.
       // Text from a 17-20 MB CoStar PDF is ~100-400 KB, well within Vercel limits.
       updateStep(0, "active");
+      const t0 = performance.now();
       const pages = await extractPDFPages(file);
+      const totalChars = pages.reduce((s, p) => s + p.length, 0);
+      console.log(
+        `1. PDF text extracted — ${pages.length} pages, ${totalChars} chars total, ` +
+        `took ${((performance.now() - t0) / 1000).toFixed(1)}s`
+      );
       updateStep(0, "done");
 
       // Step 2: Send extracted text to API for regex parsing (fast — no AI, < 2 s)
       updateStep(1, "active");
+      console.log("3. Starting API call to /api/rentcomps/process");
+      const t1 = performance.now();
 
       const res = await fetch("/api/rentcomps/process", {
         method: "POST",
@@ -76,6 +84,10 @@ function RentCompsPage() {
         body: JSON.stringify({ pages, subjectName }),
       });
 
+      console.log(
+        `4. API call complete — HTTP ${res.status}, ` +
+        `took ${((performance.now() - t1) / 1000).toFixed(1)}s`
+      );
       updateStep(1, "done");
       updateStep(2, "active");
 
@@ -97,6 +109,9 @@ function RentCompsPage() {
 
       setSteps(INITIAL_STEPS.map((s) => ({ ...s, status: "done" as StepStatus })));
       const compsData = json.data as RentCompsData;
+      console.log(
+        `2. Parsing complete — ${compsData.comps.filter((c) => !c.isSubject).length} comps found`
+      );
       setData(compsData);
       setStatus("done");
       setActiveTab("summary");
