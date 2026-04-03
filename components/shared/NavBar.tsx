@@ -5,8 +5,11 @@ import { usePathname } from "next/navigation";
 import { UserButton } from "@clerk/nextjs";
 
 const navItems = [
-  { label: "T12 & Rent Roll", href: "/rediq" },
+  { label: "Properties", href: "/properties" },
   { label: "Rent Comps", href: "/rent-comps" },
+  { label: "Rent Roll", href: "/rent-roll" },
+  { label: "T12", href: "/t12" },
+  { label: "Trade-Out", href: "/trade-out" },
 ];
 
 export default function NavBar() {
@@ -17,7 +20,7 @@ export default function NavBar() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
-          <Link href="/rediq" className="flex items-center gap-3 group">
+          <Link href="/properties" className="flex items-center gap-3 group">
             <div className="w-8 h-8 bg-gold-500 rounded flex items-center justify-center flex-shrink-0">
               <span className="text-navy-950 font-black text-sm">A</span>
             </div>
