@@ -10,6 +10,7 @@ import SubjectVsComps from "@/components/rentcomps/SubjectVsComps";
 import ProgressIndicator from "@/components/shared/ProgressIndicator";
 import type { RentCompsData } from "@/lib/schemas";
 import { extractPDFPages } from "@/lib/extract-pdf-client";
+import { parseCoStarPages } from "@/lib/costar-parser";
 
 type Status = "idle" | "processing" | "done" | "error";
 type StepStatus = "pending" | "active" | "done" | "error";
@@ -73,45 +74,28 @@ function RentCompsPage() {
       );
       updateStep(0, "done");
 
-      // Step 2: Send extracted text to API for regex parsing (fast — no AI, < 2 s)
+      // Step 2: Parse entirely in the browser — no server call, no timeout risk.
       updateStep(1, "active");
-      console.log("3. Starting API call to /api/rentcomps/process");
+      console.log("3. Starting client-side parse");
       const t1 = performance.now();
 
-      const res = await fetch("/api/rentcomps/process", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pages, subjectName }),
-      });
+      const compsData = parseCoStarPages(pages, subjectName);
 
       console.log(
-        `4. API call complete — HTTP ${res.status}, ` +
+        `2. Parsing complete — ${compsData.comps.filter((c) => !c.isSubject).length} comps found, ` +
         `took ${((performance.now() - t1) / 1000).toFixed(1)}s`
       );
       updateStep(1, "done");
       updateStep(2, "active");
 
-      // Safely parse — defensive against any unexpected non-JSON response
-      const rawText = await res.text();
-      let json: { success?: boolean; error?: string; data?: unknown };
-      try {
-        json = JSON.parse(rawText);
-      } catch {
-        const statusHint =
-          res.status === 504 ? "Request timed out — try a smaller PDF."
-          : `Server error ${res.status}.`;
-        throw new Error(statusHint);
-      }
-
-      if (!json.success) {
-        throw new Error(json.error || "Processing failed");
+      if (!compsData.comps.length && !compsData.subjectProperty) {
+        throw new Error(
+          "Could not parse any comp data from this PDF. Please verify it is a CoStar Underwriting Report."
+        );
       }
 
       setSteps(INITIAL_STEPS.map((s) => ({ ...s, status: "done" as StepStatus })));
-      const compsData = json.data as RentCompsData;
-      console.log(
-        `2. Parsing complete — ${compsData.comps.filter((c) => !c.isSubject).length} comps found`
-      );
+      console.log("4. Rendering results");
       setData(compsData);
       setStatus("done");
       setActiveTab("summary");
