@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import NavBar from "@/components/shared/NavBar";
 import CoStarUpload from "@/components/rentcomps/CoStarUpload";
 import CompsSummaryTable from "@/components/rentcomps/CompsSummaryTable";
@@ -20,7 +21,10 @@ const INITIAL_STEPS = [
   { label: "Building analysis", status: "pending" as StepStatus },
 ];
 
-export default function RentCompsPage() {
+interface Property { id: string; name: string; }
+
+function RentCompsPage() {
+  const searchParams = useSearchParams();
   const [file, setFile] = useState<File | null>(null);
   const [subjectName, setSubjectName] = useState("");
   const [status, setStatus] = useState<Status>("idle");
@@ -28,6 +32,21 @@ export default function RentCompsPage() {
   const [steps, setSteps] = useState(INITIAL_STEPS);
   const [data, setData] = useState<RentCompsData | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>("summary");
+  const [properties, setProperties] = useState<Property[]>([]);
+  const [selectedPropertyId, setSelectedPropertyId] = useState<string>("");
+  const [savedToLibrary, setSavedToLibrary] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/properties").then((r) => r.json()).then((rows) => {
+      if (Array.isArray(rows)) {
+        setProperties(rows);
+        const pid = searchParams.get("propertyId");
+        if (pid && rows.some((p: Property) => p.id === pid)) {
+          setSelectedPropertyId(pid);
+        }
+      }
+    }).catch(() => {});
+  }, [searchParams]);
 
   function updateStep(idx: number, s: StepStatus) {
     setSteps((prev) => prev.map((step, i) => (i === idx ? { ...step, status: s } : step)));
@@ -76,9 +95,27 @@ export default function RentCompsPage() {
       }
 
       setSteps(INITIAL_STEPS.map((s) => ({ ...s, status: "done" as StepStatus })));
-      setData(json.data as RentCompsData);
+      const compsData = json.data as RentCompsData;
+      setData(compsData);
       setStatus("done");
       setActiveTab("summary");
+
+      // Auto-save to property library if a property is pre-selected
+      if (selectedPropertyId) {
+        const label = file?.name || "Rent Comps";
+        fetch(`/api/properties/${selectedPropertyId}/reports`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "rentcomps",
+            label,
+            metadata: {
+              compCount: compsData.comps.filter((c) => !c.isSubject).length,
+              subject: compsData.subjectProperty?.propertyName ?? null,
+            },
+          }),
+        }).then(() => setSavedToLibrary(true)).catch(() => {});
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Processing failed";
       setError(msg);
@@ -122,6 +159,7 @@ export default function RentCompsPage() {
     setError(null);
     setData(null);
     setSteps(INITIAL_STEPS);
+    setSavedToLibrary(false);
   }
 
   const tabs: Array<{ id: Tab; label: string }> = [
@@ -158,6 +196,27 @@ export default function RentCompsPage() {
             </div>
 
             <div className="space-y-4">
+              {properties.length > 0 && (
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5">
+                    Property (optional)
+                  </label>
+                  <select
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy-500 focus:ring-1 focus:ring-navy-500 disabled:opacity-50"
+                    value={selectedPropertyId}
+                    onChange={(e) => setSelectedPropertyId(e.target.value)}
+                    disabled={status === "processing"}
+                  >
+                    <option value="">— Save to property library —</option>
+                    {properties.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                  {savedToLibrary && (
+                    <p className="text-xs text-green-600 font-medium mt-1">✓ Saved to library</p>
+                  )}
+                </div>
+              )}
               <div>
                 <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5">
                   Subject Property Name
@@ -279,5 +338,14 @@ export default function RentCompsPage() {
         )}
       </main>
     </div>
+  );
+}
+
+// useSearchParams requires a Suspense boundary in Next.js 14 static builds
+export default function RentCompsPageWrapper() {
+  return (
+    <Suspense>
+      <RentCompsPage />
+    </Suspense>
   );
 }

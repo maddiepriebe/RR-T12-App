@@ -27,12 +27,14 @@ interface Report {
 const TYPE_LABELS: Record<string, string> = {
   t12: "T12",
   rentroll: "Rent Roll",
+  rentcomps: "Rent Comps",
   tradeout: "Trade-Out",
 };
 
 const TYPE_COLORS: Record<string, string> = {
   t12: "bg-blue-100 text-blue-700",
   rentroll: "bg-green-100 text-green-700",
+  rentcomps: "bg-orange-100 text-orange-700",
   tradeout: "bg-purple-100 text-purple-700",
 };
 
@@ -109,6 +111,9 @@ export default function PropertyPage() {
               <Link href={`/t12?propertyId=${id}`} className="btn-outline text-sm py-1.5 px-4">
                 + T12
               </Link>
+              <Link href={`/rent-comps?propertyId=${id}`} className="btn-outline text-sm py-1.5 px-4">
+                + Rent Comps
+              </Link>
               <Link href={`/trade-out?propertyId=${id}`} className="btn-outline text-sm py-1.5 px-4">
                 + Trade-Out
               </Link>
@@ -120,11 +125,11 @@ export default function PropertyPage() {
         {reports.length === 0 ? (
           <div className="card text-center py-12">
             <p className="text-gray-400 text-sm">No reports yet for this property.</p>
-            <p className="text-gray-400 text-xs mt-1">Upload a Rent Roll, T12, or run a Trade-Out analysis.</p>
+            <p className="text-gray-400 text-xs mt-1">Upload a Rent Roll, T12, Rent Comps, or run a Trade-Out analysis.</p>
           </div>
         ) : (
           <div className="space-y-6">
-            {["rentroll", "t12", "tradeout"].filter((t) => grouped[t]).map((type) => (
+            {["rentroll", "t12", "rentcomps", "tradeout"].filter((t) => grouped[t]).map((type) => (
               <div key={type} className="card">
                 <p className="section-header">{TYPE_LABELS[type]} Reports</p>
                 <table className="finance-table text-xs">
