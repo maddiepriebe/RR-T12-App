@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { db, properties } from "@/lib/db";
+import { getDb, properties } from "@/lib/db";
 import { eq, desc } from "drizzle-orm";
 
 export async function GET() {
@@ -8,6 +8,7 @@ export async function GET() {
     const { userId } = await auth();
     if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+    const db = getDb();
     const rows = await db
       .select()
       .from(properties)
@@ -31,6 +32,7 @@ export async function POST(req: NextRequest) {
 
     if (!name) return NextResponse.json({ error: "Name required" }, { status: 400 });
 
+    const db = getDb();
     const [prop] = await db
       .insert(properties)
       .values({ name, address, city, state, zip, units, clerkUserId: userId })

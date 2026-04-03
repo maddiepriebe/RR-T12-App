@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { db, properties } from "@/lib/db";
+import { getDb, properties } from "@/lib/db";
 import { eq, and } from "drizzle-orm";
 
 export async function GET(
@@ -11,6 +11,7 @@ export async function GET(
     const { userId } = await auth();
     if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+    const db = getDb();
     const [prop] = await db
       .select()
       .from(properties)
