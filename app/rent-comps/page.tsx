@@ -88,7 +88,20 @@ function RentCompsPage() {
       clearTimeout(progressTimer2);
       clearTimeout(progressTimer3);
 
-      const json = await res.json();
+      // Safely parse JSON — platform-level errors (413 Too Large, 504 Timeout)
+      // return plain text/HTML which would throw "Unexpected token" from .json()
+      const rawText = await res.text();
+      let json: { success?: boolean; error?: string; data?: unknown };
+      try {
+        json = JSON.parse(rawText);
+      } catch {
+        // The server returned non-JSON (e.g. Vercel 413 / 504 page)
+        const statusHint =
+          res.status === 413 ? "File too large for current plan (max ~4.5 MB on Hobby)."
+          : res.status === 504 ? "Request timed out — try a smaller PDF."
+          : `Server error ${res.status}.`;
+        throw new Error(statusHint);
+      }
 
       if (!json.success) {
         throw new Error(json.error || "Processing failed");

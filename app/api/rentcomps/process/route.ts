@@ -3,6 +3,12 @@ import { callClaude, parseClaudeJSON } from "@/lib/anthropic";
 import { parsePDF, extractPageRange } from "@/lib/pdf-parser";
 import type { RentCompsData, CompSummary, CompDetail } from "@/lib/schemas";
 
+// App Router: formData() reads the body stream directly — no Next.js body parser,
+// no hard-coded size limit. Large CoStar PDFs (15-20 MB) are supported.
+// maxDuration gives Vercel enough time for PDF parsing + multiple Claude calls.
+export const dynamic = "force-dynamic";
+export const maxDuration = 60; // seconds (requires Vercel Pro for values > 10)
+
 const SUMMARY_SYSTEM_PROMPT = `You are a multifamily real estate analyst. Extract rent comp summary data from CoStar report text.
 
 Return ONLY a valid JSON array of comp objects — no markdown, no commentary.
