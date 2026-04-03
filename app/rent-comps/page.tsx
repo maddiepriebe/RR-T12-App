@@ -17,9 +17,8 @@ type Tab = "summary" | "unitmix" | "comparison";
 
 const INITIAL_STEPS = [
   { label: "Reading PDF in browser", status: "pending" as StepStatus },
-  { label: "Parsing comp summary table", status: "pending" as StepStatus },
+  { label: "Parsing summary table", status: "pending" as StepStatus },
   { label: "Extracting unit mix details", status: "pending" as StepStatus },
-  { label: "Building analysis", status: "pending" as StepStatus },
 ];
 
 interface Property { id: string; name: string; }
@@ -68,16 +67,8 @@ function RentCompsPage() {
       const pages = await extractPDFPages(file);
       updateStep(0, "done");
 
-      // Step 2+3: Send only the text array to the API; simulate progress while waiting
+      // Step 2: Send extracted text to API for regex parsing (fast — no AI, < 2 s)
       updateStep(1, "active");
-      const progressTimer2 = setTimeout(() => {
-        updateStep(1, "done");
-        updateStep(2, "active");
-      }, 8000);
-      const progressTimer3 = setTimeout(() => {
-        updateStep(2, "done");
-        updateStep(3, "active");
-      }, 20000);
 
       const res = await fetch("/api/rentcomps/process", {
         method: "POST",
@@ -85,8 +76,8 @@ function RentCompsPage() {
         body: JSON.stringify({ pages, subjectName }),
       });
 
-      clearTimeout(progressTimer2);
-      clearTimeout(progressTimer3);
+      updateStep(1, "done");
+      updateStep(2, "active");
 
       // Safely parse — defensive against any unexpected non-JSON response
       const rawText = await res.text();
@@ -301,7 +292,7 @@ function RentCompsPage() {
             <p className="section-header">Processing CoStar Report</p>
             <ProgressIndicator steps={steps} />
             <p className="text-xs text-gray-400 mt-3">
-              Large reports may take 30–60 seconds. AI is extracting and parsing all comp data...
+              Parsing comp data from PDF — usually completes in under 10 seconds.
             </p>
           </div>
         )}

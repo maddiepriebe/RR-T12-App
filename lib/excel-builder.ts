@@ -139,103 +139,74 @@ function buildRentRollSheet(rr: RentRollData): XLSX.WorkSheet {
 }
 
 // ─── Rent Comps Excel Builder ──────────────────────────────────────
+// Produces exactly 2 sheets matching Arel Capital reference format:
+//   Sheet 1: "Rent Comps Summary" — 18-column table, subject in gold, comps ranked by Rent/SF
+//   Sheet 2: "Data Sheet"         — columns A–E blank, 4 bedroom sections with per-floor-plan rows
 export function buildRentCompsWorkbook(data: RentCompsData): XLSX.WorkBook {
   const wb = XLSX.utils.book_new();
-
-  XLSX.utils.book_append_sheet(wb, buildSummarySheet(data), "Rent Comps Summary");
-  XLSX.utils.book_append_sheet(wb, buildUnitMixSheet(data), "Unit Mix Detail");
-  XLSX.utils.book_append_sheet(wb, buildBedroomSheet(data, 0), "Studio Comparison");
-  XLSX.utils.book_append_sheet(wb, buildBedroomSheet(data, 1), "1BR Comparison");
-  XLSX.utils.book_append_sheet(wb, buildBedroomSheet(data, 2), "2BR Comparison");
-  XLSX.utils.book_append_sheet(wb, buildBedroomSheet(data, 3), "3BR Comparison");
-  XLSX.utils.book_append_sheet(wb, buildSubjectVsCompsSheet(data), "Subject vs Comps");
-
+  XLSX.utils.book_append_sheet(wb, buildRCSheet1(data), "Rent Comps Summary");
+  XLSX.utils.book_append_sheet(wb, buildRCSheet2(data), "Data Sheet");
   return wb;
 }
 
-function buildSummarySheet(data: RentCompsData): XLSX.WorkSheet {
-  const headers = [
-    "Rank",
-    "Property Name",
-    "Address",
-    "Year Built",
-    "Units",
-    "Stories",
-    "Avg SF",
-    "Distance (mi)",
-    "Studio Rent",
-    "1BR Rent",
-    "2BR Rent",
-    "3BR Rent",
-    "Rent/SF",
-    "Vacancy %",
-    "Effective Rent/Unit",
-    "Effective Rent/SF",
-    "Concessions %",
-  ];
+// ── Sheet 1: Rent Comps Summary ────────────────────────────────────
+function buildRCSheet1(data: RentCompsData): XLSX.WorkSheet {
+  const NUM_COLS = 18;
 
-  const rows: (string | number | null)[][] = [
-    ["Rent Comps Summary", ...Array(headers.length - 1).fill("")],
-    headers,
-  ];
+  // Sort comps (non-subject) by Rent/SF descending and re-rank 1..N
+  const subjectComp = data.comps.find((c) => c.isSubject);
+  const sortedComps = [...data.comps.filter((c) => !c.isSubject)]
+    .sort((a, b) => (b.rentPerSF ?? 0) - (a.rentPerSF ?? 0))
+    .map((c, i) => ({ ...c, rank: i + 1 }));
 
-  // Subject first if available
-  if (data.subjectProperty) {
-    const s = data.comps.find((c) => c.isSubject) || {
-      rank: 0,
-      name: data.subjectProperty!.propertyName,
-      address: data.subjectProperty!.address || "",
-      city: "",
-      state: "",
-      yearBuilt: data.subjectProperty!.yearBuilt,
-      totalUnits: null,
-      stories: null,
-      avgUnitSF: null,
-      distanceToSubjectMiles: 0,
-      studioAskingRent: null,
-      oneBedAskingRent: null,
-      twoBedAskingRent: null,
-      threeBedAskingRent: null,
-      rentPerSF: null,
-      totalVacancyPct: null,
-      totalAvailabilityPct: null,
-      askingRentPerUnit: null,
-      askingRentPerSF: null,
-      effectiveRentPerUnit: null,
-      effectiveRentPerSF: null,
-      concessionsPct: null,
-    };
+  const rows: (string | number | null)[][] = [];
+
+  // Row 0: Title (will be merged)
+  rows.push(["Rent Comps Summary", ...Array(NUM_COLS - 1).fill(null)]);
+
+  // Row 1: Column headers
+  rows.push([
+    "Rank", "Property Name", "Address", "Year Built", "Units", "Stories", "Avg SF",
+    "Distance (mi)", "CoStar Rating", "Studio Rent", "1BR Rent", "2BR Rent", "3BR Rent",
+    "Rent/SF", "Vacancy %", "Effective Rent/Unit", "Effective Rent/SF", "Concessions %",
+  ]);
+
+  // Row 2: Subject property ("Subject" in Rank col, no Distance)
+  if (subjectComp) {
     rows.push([
       "Subject",
-      s.name,
-      `${s.address}${s.city ? ", " + s.city : ""}`,
-      s.yearBuilt ?? null,
-      s.totalUnits ?? null,
-      s.stories ?? null,
-      s.avgUnitSF ?? null,
-      s.distanceToSubjectMiles ?? null,
-      s.studioAskingRent,
-      s.oneBedAskingRent,
-      s.twoBedAskingRent,
-      s.threeBedAskingRent,
-      s.rentPerSF,
-      s.totalVacancyPct != null ? s.totalVacancyPct / 100 : null,
-      s.effectiveRentPerUnit,
-      s.effectiveRentPerSF,
-      s.concessionsPct != null ? s.concessionsPct / 100 : null,
+      subjectComp.name,
+      [subjectComp.address, subjectComp.city].filter(Boolean).join(", "),
+      subjectComp.yearBuilt,
+      subjectComp.totalUnits,
+      subjectComp.stories,
+      subjectComp.avgUnitSF,
+      null,                                       // no distance for subject
+      subjectComp.coStarRating ?? null,
+      subjectComp.studioAskingRent,
+      subjectComp.oneBedAskingRent,
+      subjectComp.twoBedAskingRent,
+      subjectComp.threeBedAskingRent,
+      subjectComp.rentPerSF,
+      subjectComp.totalVacancyPct != null ? subjectComp.totalVacancyPct / 100 : null,
+      subjectComp.effectiveRentPerUnit,
+      subjectComp.effectiveRentPerSF,
+      subjectComp.concessionsPct != null ? subjectComp.concessionsPct / 100 : null,
     ]);
   }
 
-  for (const comp of data.comps.filter((c) => !c.isSubject)) {
+  // Rows 3+: Comps ranked 1..N sorted by Rent/SF desc
+  for (const comp of sortedComps) {
     rows.push([
       comp.rank,
       comp.name,
-      `${comp.address}${comp.city ? ", " + comp.city : ""}`,
+      [comp.address, comp.city].filter(Boolean).join(", "),
       comp.yearBuilt,
       comp.totalUnits,
       comp.stories,
       comp.avgUnitSF,
       comp.distanceToSubjectMiles,
+      comp.coStarRating ?? null,
       comp.studioAskingRent,
       comp.oneBedAskingRent,
       comp.twoBedAskingRent,
@@ -248,235 +219,327 @@ function buildSummarySheet(data: RentCompsData): XLSX.WorkSheet {
     ]);
   }
 
-  // Averages row
-  const compRows = data.comps.filter((c) => !c.isSubject);
-  const avg = (key: keyof CompSummary) => {
-    const vals = compRows.map((c) => c[key] as number | null).filter((v): v is number => v != null);
+  // Final row: AVERAGE (Comps) — simple avg for most cols, weighted avg by units for rent metrics
+  const simpleAvg = (key: keyof CompSummary): number | null => {
+    const vals = sortedComps
+      .map((c) => c[key] as number | null)
+      .filter((v): v is number => v != null);
     return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
   };
+
+  const weightedAvg = (key: keyof CompSummary): number | null => {
+    const pairs = sortedComps
+      .map((c) => ({ v: c[key] as number | null, u: c.totalUnits }))
+      .filter((p): p is { v: number; u: number } => p.v != null && p.u != null);
+    const sumU = pairs.reduce((s, p) => s + p.u, 0);
+    if (sumU === 0 || pairs.length === 0) return simpleAvg(key);
+    return pairs.reduce((s, p) => s + p.v * p.u, 0) / sumU;
+  };
+
+  const avgYearBuilt = simpleAvg("yearBuilt");
+  const avgUnits = simpleAvg("totalUnits");
+  const avgSF = simpleAvg("avgUnitSF");
+  const avgVacancy = simpleAvg("totalVacancyPct");
+  const avgConc = simpleAvg("concessionsPct");
+
   rows.push([
-    "",
+    null,
     "AVERAGE (Comps)",
-    "",
-    avg("yearBuilt") ? Math.round(avg("yearBuilt")!) : null,
-    avg("totalUnits") ? Math.round(avg("totalUnits")!) : null,
-    "",
-    avg("avgUnitSF") ? Math.round(avg("avgUnitSF")!) : null,
-    avg("distanceToSubjectMiles"),
-    avg("studioAskingRent"),
-    avg("oneBedAskingRent"),
-    avg("twoBedAskingRent"),
-    avg("threeBedAskingRent"),
-    avg("rentPerSF"),
-    avg("totalVacancyPct") != null ? avg("totalVacancyPct")! / 100 : null,
-    avg("effectiveRentPerUnit"),
-    avg("effectiveRentPerSF"),
-    avg("concessionsPct") != null ? avg("concessionsPct")! / 100 : null,
+    null,
+    avgYearBuilt != null ? Math.round(avgYearBuilt) : null,
+    avgUnits != null ? Math.round(avgUnits) : null,
+    null,
+    avgSF != null ? Math.round(avgSF) : null,
+    simpleAvg("distanceToSubjectMiles"),
+    null,                                          // no avg for CoStar Rating
+    simpleAvg("studioAskingRent"),
+    simpleAvg("oneBedAskingRent"),
+    simpleAvg("twoBedAskingRent"),
+    simpleAvg("threeBedAskingRent"),
+    weightedAvg("rentPerSF"),
+    avgVacancy != null ? avgVacancy / 100 : null,
+    weightedAvg("effectiveRentPerUnit"),
+    weightedAvg("effectiveRentPerSF"),
+    avgConc != null ? avgConc / 100 : null,
   ]);
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
-  ws["!cols"] = [
-    { wch: 7 }, { wch: 28 }, { wch: 30 }, { wch: 11 }, { wch: 7 },
-    { wch: 8 }, { wch: 9 }, { wch: 13 }, { wch: 13 }, { wch: 11 },
-    { wch: 11 }, { wch: 11 }, { wch: 10 }, { wch: 11 }, { wch: 18 },
-    { wch: 18 }, { wch: 13 },
-  ];
+
+  // Merge title row across all 18 columns
+  ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: NUM_COLS - 1 } }];
+
+  // Freeze below header row (rows 0 + 1)
   ws["!freeze"] = { xSplit: 0, ySplit: 2 };
+
+  // Column widths
+  ws["!cols"] = [
+    { wch: 8 },  // Rank
+    { wch: 28 }, // Property Name
+    { wch: 32 }, // Address
+    { wch: 11 }, // Year Built
+    { wch: 7 },  // Units
+    { wch: 8 },  // Stories
+    { wch: 9 },  // Avg SF
+    { wch: 13 }, // Distance
+    { wch: 12 }, // CoStar Rating
+    { wch: 13 }, // Studio Rent
+    { wch: 11 }, // 1BR Rent
+    { wch: 11 }, // 2BR Rent
+    { wch: 11 }, // 3BR Rent
+    { wch: 10 }, // Rent/SF
+    { wch: 11 }, // Vacancy %
+    { wch: 18 }, // Effective Rent/Unit
+    { wch: 18 }, // Effective Rent/SF
+    { wch: 13 }, // Concessions %
+  ];
+
+  // Apply number formats (rows 2+ = subject + comps + avg)
+  const range = XLSX.utils.decode_range(ws["!ref"]!);
+  for (let R = 2; R <= range.e.r; R++) {
+    // Studio, 1BR, 2BR, 3BR rents, Effective Rent/Unit → $#,##0
+    [9, 10, 11, 12, 15].forEach((C) => {
+      const cell = ws[XLSX.utils.encode_cell({ r: R, c: C })];
+      if (cell && cell.t === "n") cell.z = "$#,##0";
+    });
+    // Rent/SF, Effective Rent/SF → $0.00
+    [13, 16].forEach((C) => {
+      const cell = ws[XLSX.utils.encode_cell({ r: R, c: C })];
+      if (cell && cell.t === "n") cell.z = "$0.00";
+    });
+    // Vacancy %, Concessions % → stored as decimal, format 0.0%
+    [14, 17].forEach((C) => {
+      const cell = ws[XLSX.utils.encode_cell({ r: R, c: C })];
+      if (cell && cell.t === "n") cell.z = "0.0%";
+    });
+    // Distance → 0.00
+    const distCell = ws[XLSX.utils.encode_cell({ r: R, c: 7 })];
+    if (distCell && distCell.t === "n") distCell.z = "0.00";
+  }
+
   return ws;
 }
 
-function buildUnitMixSheet(data: RentCompsData): XLSX.WorkSheet {
-  const allProps: CompDetail[] = [];
-  if (data.subjectProperty) allProps.push({ ...data.subjectProperty, isSubject: true });
-  allProps.push(...data.compDetails);
+// ── Sheet 2: Data Sheet ────────────────────────────────────────────
+// Columns A–E blank; data in F–R (0-indexed cols 5–17)
+// 4 sections: Studio, 1BR, 2BR, 3BR — subject first, then comps in rank order
+// Each section: section header row, per-floor-plan rows, totals row, 3 blank rows
+function buildRCSheet2(data: RentCompsData): XLSX.WorkSheet {
+  // 5 nulls for the blank A–E columns
+  const BLANK = [null, null, null, null, null] as const;
 
-  const headers = [
-    "Bed",
-    "Bath",
-    "Avg SF",
-    "Units",
-    "Mix %",
-    "Avail Units",
-    "Avail %",
-    "Asking Rent/Unit",
-    "Asking Rent/SF",
-    "Eff Rent/Unit",
-    "Eff Rent/SF",
-    "Concessions %",
+  const colHeaders = [
+    "Property Name", "Bed", "Bath", "Avg SF", "Units", "Mix %",
+    "ASK Per Unit", "ASK Per SF", "EFF Per Unit", "EFF Per SF",
+    "Concessions", "Vintage", "Stars",
   ];
+
+  // Comps sorted by Rent/SF descending (same order as Sheet 1)
+  const sortedComps = [...data.comps.filter((c) => !c.isSubject)]
+    .sort((a, b) => (b.rentPerSF ?? 0) - (a.rentPerSF ?? 0));
+
+  // Build lookup: property name (lowercased) → CompSummary
+  const summaryByName = new Map<string, CompSummary>();
+  for (const c of data.comps) {
+    summaryByName.set(c.name.toLowerCase().trim(), c);
+  }
+
+  // Ordered list of CompDetail: subject first, then comps in rank order
+  const orderedDetails: CompDetail[] = [];
+  if (data.subjectProperty) {
+    orderedDetails.push({ ...data.subjectProperty, isSubject: true });
+  }
+  for (const comp of sortedComps) {
+    const detail = data.compDetails.find(
+      (d) => d.propertyName.toLowerCase().trim() === comp.name.toLowerCase().trim()
+    );
+    if (detail && !orderedDetails.includes(detail)) {
+      orderedDetails.push(detail);
+    }
+  }
+  // Append any comp details not matched by name
+  for (const detail of data.compDetails) {
+    if (!orderedDetails.includes(detail)) {
+      orderedDetails.push(detail);
+    }
+  }
 
   const rows: (string | number | null)[][] = [];
 
-  for (const prop of allProps) {
-    rows.push([
-      `${prop.isSubject ? "[SUBJECT] " : ""}${prop.propertyName}`,
-      prop.address || "",
-      ...Array(headers.length - 2).fill(""),
-    ]);
-    rows.push(headers);
+  // 2 blank rows so data starts at Excel row 3 (matching reference range F3:R…)
+  rows.push([...BLANK, ...Array(13).fill(null)]);
+  rows.push([...BLANK, ...Array(13).fill(null)]);
 
-    for (const ut of prop.unitTypes) {
+  // Column headers row (Excel row 3)
+  rows.push([...BLANK, ...colHeaders]);
+
+  const sectionLabels: Record<number, string> = {
+    0: "Studio",
+    1: "1 Bedroom",
+    2: "2 Bedroom",
+    3: "3 Bedroom",
+  };
+
+  for (const bed of [0, 1, 2, 3]) {
+    // Collect individual floor-plan rows for this bedroom type
+    // Exclude CoStar summary rows ("All Studios", "All 1 Beds", "Totals", etc.)
+    type FloorPlanRow = {
+      propertyName: string;
+      isSubject: boolean;
+      bedDisplay: string | number;
+      bath: number | null;
+      avgSF: number | null;
+      units: number | null;
+      mixPct: number | null;    // stored as decimal (÷100)
+      askPerUnit: number | null;
+      askPerSF: number | null;
+      effPerUnit: number | null;
+      effPerSF: number | null;
+      concessions: number | null; // stored as decimal (÷100)
+      vintage: number | null;
+      stars: number | null;
+    };
+
+    const sectionRows: FloorPlanRow[] = [];
+
+    for (const detail of orderedDetails) {
+      const isSubject = detail.isSubject ?? false;
+      const summary = summaryByName.get(detail.propertyName.toLowerCase().trim());
+      const vintage = summary?.yearBuilt ?? detail.yearBuilt ?? null;
+      const stars = summary?.coStarRating ?? null;
+
+      // Individual floor-plan types for this bed, excluding aggregate/summary rows
+      const unitTypes = detail.unitTypes.filter((ut) => {
+        if (ut.bed !== bed) return false;
+        const lbl = (ut.label ?? "").toLowerCase().trim();
+        if (lbl.startsWith("all ")) return false;
+        if (lbl === "totals" || lbl === "total") return false;
+        return true;
+      });
+
+      for (const ut of unitTypes) {
+        sectionRows.push({
+          propertyName: detail.propertyName,
+          isSubject,
+          bedDisplay: bed === 0 ? "Studio" : bed,
+          bath: ut.bath,
+          avgSF: ut.avgSF,
+          units: ut.units,
+          mixPct: ut.mixPct != null ? ut.mixPct / 100 : null,
+          askPerUnit: ut.askingRentPerUnit,
+          askPerSF: ut.askingRentPerSF,
+          effPerUnit: ut.effectiveRentPerUnit,
+          effPerSF: ut.effectiveRentPerSF,
+          concessions: ut.concessionsPct != null ? ut.concessionsPct / 100 : null,
+          vintage,
+          stars,
+        });
+      }
+    }
+
+    // Skip sections with no data
+    if (sectionRows.length === 0) continue;
+
+    // Section header row
+    rows.push([...BLANK, sectionLabels[bed], null, null, null, null, null, null, null, null, null, null, null, null]);
+
+    // Floor plan data rows
+    for (const r of sectionRows) {
       rows.push([
-        ut.bed,
-        ut.bath,
-        ut.avgSF,
-        ut.units,
-        ut.mixPct != null ? ut.mixPct / 100 : null,
-        ut.availableUnits,
-        ut.availabilityPct != null ? ut.availabilityPct / 100 : null,
-        ut.askingRentPerUnit,
-        ut.askingRentPerSF,
-        ut.effectiveRentPerUnit,
-        ut.effectiveRentPerSF,
-        ut.concessionsPct != null ? ut.concessionsPct / 100 : null,
+        ...BLANK,
+        r.propertyName,
+        r.bedDisplay,
+        r.bath,
+        r.avgSF,
+        r.units,
+        r.mixPct,
+        r.askPerUnit,
+        r.askPerSF,
+        r.effPerUnit,
+        r.effPerSF,
+        r.concessions,
+        r.vintage,
+        r.stars,
       ]);
     }
 
-    rows.push(Array(headers.length).fill("")); // spacer
+    // Totals row: sum units, weighted-avg rents, simple-avg SF
+    const totalUnits = sectionRows.reduce((s, r) => s + (r.units ?? 0), 0);
+
+    const wAvg = (key: keyof FloorPlanRow): number | null => {
+      const pairs = sectionRows
+        .map((r) => ({ v: r[key] as number | null, u: r.units }))
+        .filter((p): p is { v: number; u: number } => p.v != null && p.u != null);
+      const sumU = pairs.reduce((s, p) => s + p.u, 0);
+      if (sumU === 0 || pairs.length === 0) return null;
+      return pairs.reduce((s, p) => s + p.v * p.u, 0) / sumU;
+    };
+
+    const sfVals = sectionRows.map((r) => r.avgSF).filter((v): v is number => v != null);
+    const avgSF = sfVals.length ? sfVals.reduce((a, b) => a + b, 0) / sfVals.length : null;
+
+    rows.push([
+      ...BLANK,
+      null,          // Property Name
+      null,          // Bed
+      null,          // Bath
+      avgSF,         // Avg SF — simple average
+      totalUnits,    // Units — sum
+      1.0,           // Mix % — 100% for totals row
+      wAvg("askPerUnit"),
+      wAvg("askPerSF"),
+      wAvg("effPerUnit"),
+      wAvg("effPerSF"),
+      null,          // Concessions
+      null,          // Vintage
+      null,          // Stars
+    ]);
+
+    // 3 blank spacer rows between sections
+    rows.push([...BLANK, ...Array(13).fill(null)]);
+    rows.push([...BLANK, ...Array(13).fill(null)]);
+    rows.push([...BLANK, ...Array(13).fill(null)]);
   }
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
+
+  // Column widths: A–E very narrow, F–R data columns
   ws["!cols"] = [
-    { wch: 6 }, { wch: 6 }, { wch: 8 }, { wch: 7 }, { wch: 8 },
-    { wch: 11 }, { wch: 9 }, { wch: 17 }, { wch: 16 }, { wch: 14 },
-    { wch: 13 }, { wch: 14 },
-  ];
-  return ws;
-}
-
-function buildBedroomSheet(data: RentCompsData, bed: number): XLSX.WorkSheet {
-  const label = bed === 0 ? "Studio" : `${bed}BR`;
-  const headers = [
-    "Property",
-    "Address",
-    "Year Built",
-    "Total Units",
-    "Units of Type",
-    "Mix %",
-    "Avg SF",
-    "Asking Rent/Unit",
-    "Asking Rent/SF",
-    "Eff Rent/Unit",
-    "Eff Rent/SF",
-    "Concessions %",
+    { wch: 1 }, { wch: 1 }, { wch: 1 }, { wch: 1 }, { wch: 1 }, // A–E blank
+    { wch: 30 }, // F  Property Name
+    { wch: 8 },  // G  Bed
+    { wch: 6 },  // H  Bath
+    { wch: 9 },  // I  Avg SF
+    { wch: 7 },  // J  Units
+    { wch: 9 },  // K  Mix %
+    { wch: 14 }, // L  ASK Per Unit
+    { wch: 12 }, // M  ASK Per SF
+    { wch: 14 }, // N  EFF Per Unit
+    { wch: 12 }, // O  EFF Per SF
+    { wch: 12 }, // P  Concessions
+    { wch: 9 },  // Q  Vintage
+    { wch: 7 },  // R  Stars
   ];
 
-  const rows: (string | number | null)[][] = [
-    [`${label} Comparison`, ...Array(headers.length - 1).fill("")],
-    headers,
-  ];
-
-  const allProps: Array<{ detail: CompDetail; summary?: CompSummary }> = [];
-  if (data.subjectProperty) {
-    allProps.push({
-      detail: { ...data.subjectProperty, isSubject: true },
-      summary: data.comps.find((c) => c.isSubject),
+  // Apply number formats to data rows (skip first 3 rows: 2 blank + header)
+  const range = XLSX.utils.decode_range(ws["!ref"]!);
+  for (let R = 3; R <= range.e.r; R++) {
+    // ASK Per Unit (col 11), EFF Per Unit (col 13) → $#,##0
+    [11, 13].forEach((C) => {
+      const cell = ws[XLSX.utils.encode_cell({ r: R, c: C })];
+      if (cell && cell.t === "n") cell.z = "$#,##0";
+    });
+    // ASK Per SF (col 12), EFF Per SF (col 14) → $0.00
+    [12, 14].forEach((C) => {
+      const cell = ws[XLSX.utils.encode_cell({ r: R, c: C })];
+      if (cell && cell.t === "n") cell.z = "$0.00";
+    });
+    // Mix % (col 10), Concessions (col 15) — stored as true decimal → 0.00%
+    [10, 15].forEach((C) => {
+      const cell = ws[XLSX.utils.encode_cell({ r: R, c: C })];
+      if (cell && cell.t === "n") cell.z = "0.00%";
     });
   }
-  for (const d of data.compDetails) {
-    allProps.push({
-      detail: d,
-      summary: data.comps.find((c) => c.name === d.propertyName),
-    });
-  }
 
-  for (const { detail, summary } of allProps) {
-    const unitTypes = detail.unitTypes.filter((u) => u.bed === bed && !u.label?.startsWith("All"));
-    if (unitTypes.length === 0) continue;
-
-    for (const ut of unitTypes) {
-      rows.push([
-        `${detail.isSubject ? "[SUBJECT] " : ""}${detail.propertyName}`,
-        detail.address || "",
-        summary?.yearBuilt || detail.yearBuilt || null,
-        summary?.totalUnits || null,
-        ut.units,
-        ut.mixPct != null ? ut.mixPct / 100 : null,
-        ut.avgSF,
-        ut.askingRentPerUnit,
-        ut.askingRentPerSF,
-        ut.effectiveRentPerUnit,
-        ut.effectiveRentPerSF,
-        ut.concessionsPct != null ? ut.concessionsPct / 100 : null,
-      ]);
-    }
-  }
-
-  const ws = XLSX.utils.aoa_to_sheet(rows);
-  ws["!cols"] = [
-    { wch: 28 }, { wch: 28 }, { wch: 11 }, { wch: 12 }, { wch: 13 },
-    { wch: 8 }, { wch: 8 }, { wch: 17 }, { wch: 16 }, { wch: 14 },
-    { wch: 13 }, { wch: 14 },
-  ];
-  ws["!freeze"] = { xSplit: 0, ySplit: 2 };
-  return ws;
-}
-
-function buildSubjectVsCompsSheet(data: RentCompsData): XLSX.WorkSheet {
-  const headers = [
-    "Property",
-    "Address",
-    "Year Built",
-    "Units",
-    "Avg SF",
-    "Rent/SF",
-    "Asking Rent/Unit",
-    "Eff Rent/Unit",
-    "Eff Rent/SF",
-    "Vacancy %",
-    "Concessions %",
-  ];
-
-  const rows: (string | number | null)[][] = [
-    ["Subject vs. Comps", ...Array(headers.length - 1).fill("")],
-    headers,
-  ];
-
-  // Subject first
-  const subjectComp = data.comps.find((c) => c.isSubject);
-  if (subjectComp) {
-    rows.push([
-      `[SUBJECT] ${subjectComp.name}`,
-      `${subjectComp.address}, ${subjectComp.city}`,
-      subjectComp.yearBuilt,
-      subjectComp.totalUnits,
-      subjectComp.avgUnitSF,
-      subjectComp.rentPerSF,
-      subjectComp.askingRentPerUnit,
-      subjectComp.effectiveRentPerUnit,
-      subjectComp.effectiveRentPerSF,
-      subjectComp.totalVacancyPct != null ? subjectComp.totalVacancyPct / 100 : null,
-      subjectComp.concessionsPct != null ? subjectComp.concessionsPct / 100 : null,
-    ]);
-  }
-
-  // Comps sorted by rent/SF descending
-  const sorted = [...data.comps.filter((c) => !c.isSubject)].sort(
-    (a, b) => (b.rentPerSF || 0) - (a.rentPerSF || 0)
-  );
-
-  for (const comp of sorted) {
-    rows.push([
-      comp.name,
-      `${comp.address}, ${comp.city}`,
-      comp.yearBuilt,
-      comp.totalUnits,
-      comp.avgUnitSF,
-      comp.rentPerSF,
-      comp.askingRentPerUnit,
-      comp.effectiveRentPerUnit,
-      comp.effectiveRentPerSF,
-      comp.totalVacancyPct != null ? comp.totalVacancyPct / 100 : null,
-      comp.concessionsPct != null ? comp.concessionsPct / 100 : null,
-    ]);
-  }
-
-  const ws = XLSX.utils.aoa_to_sheet(rows);
-  ws["!cols"] = [
-    { wch: 30 }, { wch: 30 }, { wch: 11 }, { wch: 7 }, { wch: 9 },
-    { wch: 10 }, { wch: 17 }, { wch: 15 }, { wch: 14 }, { wch: 11 }, { wch: 14 },
-  ];
-  ws["!freeze"] = { xSplit: 0, ySplit: 2 };
   return ws;
 }
 

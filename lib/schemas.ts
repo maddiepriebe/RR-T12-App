@@ -54,6 +54,7 @@ export interface CompSummary {
   stories: number | null;
   avgUnitSF: number | null;
   distanceToSubjectMiles: number | null;
+  coStarRating: number | null;
   studioAskingRent: number | null;
   oneBedAskingRent: number | null;
   twoBedAskingRent: number | null;
