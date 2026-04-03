@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import NavBar from "@/components/shared/NavBar";
 import ReportPreview from "@/components/properties/ReportPreview";
 import Link from "next/link";
@@ -95,6 +95,7 @@ async function downloadReport(report: ReportWithData) {
 
 export default function PropertyPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const [property, setProperty] = useState<Property | null>(null);
   const [reports, setReports] = useState<Report[]>([]);
   const [loading, setLoading] = useState(true);
@@ -103,6 +104,10 @@ export default function PropertyPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [previewCache, setPreviewCache] = useState<Record<string, ReportWithData>>({});
   const [previewLoading, setPreviewLoading] = useState(false);
+
+  // Delete confirmation state
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -151,6 +156,23 @@ export default function PropertyPage() {
       setPreviewCache((prev) => ({ ...prev, [report.id]: full }));
     }
     await downloadReport(full);
+  }
+
+  async function deleteProperty() {
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/properties/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const j = await res.json();
+        alert(j.error || "Delete failed");
+        return;
+      }
+      router.push("/properties");
+    } catch {
+      alert("An error occurred. Please try again.");
+    } finally {
+      setDeleting(false);
+    }
   }
 
   // Group reports by type
@@ -214,6 +236,12 @@ export default function PropertyPage() {
               <Link href={`/trade-out?propertyId=${id}`} className="btn-outline text-sm py-1.5 px-4">
                 + Trade-Out
               </Link>
+              <button
+                onClick={() => setShowDeleteModal(true)}
+                className="text-sm font-semibold text-red-500 hover:text-red-700 border border-red-200 hover:border-red-400 px-4 py-1.5 rounded-lg transition-colors"
+              >
+                Delete Property
+              </button>
             </div>
           </div>
         </div>
@@ -341,6 +369,36 @@ export default function PropertyPage() {
           </div>
         )}
       </main>
+
+      {/* Delete confirmation modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+            <h2 className="text-lg font-bold text-gray-900 mb-2">Delete Property</h2>
+            <p className="text-sm text-gray-600 mb-6">
+              Are you sure you want to delete{" "}
+              <span className="font-semibold text-gray-900">{property?.name}</span>?
+              This will permanently delete all associated reports and cannot be undone.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={deleteProperty}
+                disabled={deleting}
+                className="flex-1 bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold px-4 py-2.5 rounded-lg transition-colors"
+              >
+                {deleting ? "Deleting..." : "Delete"}
+              </button>
+              <button
+                onClick={() => setShowDeleteModal(false)}
+                disabled={deleting}
+                className="flex-1 btn-outline"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
