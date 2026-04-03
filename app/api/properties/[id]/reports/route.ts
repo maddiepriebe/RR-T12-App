@@ -21,8 +21,17 @@ export async function GET(
 
     if (!prop) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
+    // Exclude processedData from the list — it can be large; fetch per-report when needed
     const rows = await db
-      .select()
+      .select({
+        id: reports.id,
+        propertyId: reports.propertyId,
+        type: reports.type,
+        label: reports.label,
+        excelUrl: reports.excelUrl,
+        metadata: reports.metadata,
+        createdAt: reports.createdAt,
+      })
       .from(reports)
       .where(eq(reports.propertyId, params.id))
       .orderBy(desc(reports.createdAt));
@@ -43,12 +52,12 @@ export async function POST(
     if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const body = await req.json();
-    const { type, label, excelUrl, metadata } = body;
+    const { type, label, excelUrl, metadata, processedData } = body;
 
     const db = getDb();
     const [report] = await db
       .insert(reports)
-      .values({ propertyId: params.id, type, label, excelUrl, metadata })
+      .values({ propertyId: params.id, type, label, excelUrl, metadata, processedData })
       .returning();
 
     return NextResponse.json(report, { status: 201 });

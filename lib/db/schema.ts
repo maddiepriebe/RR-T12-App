@@ -32,9 +32,10 @@ export const properties = pgTable("properties", {
 export const reports = pgTable("reports", {
   id: uuid("id").primaryKey().defaultRandom(),
   propertyId: uuid("property_id").references(() => properties.id),
-  type: text("type").notNull(), // "t12" | "rentroll" | "tradeout"
+  type: text("type").notNull(), // "t12" | "rentroll" | "rentcomps" | "tradeout"
   label: text("label"),
   excelUrl: text("excel_url"),
   metadata: jsonb("metadata"),
+  processedData: jsonb("processed_data"), // full parsed output for inline preview
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });

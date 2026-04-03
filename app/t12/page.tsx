@@ -94,7 +94,12 @@ export default function T12Page() {
     await fetch(`/api/properties/${selectedPropertyId}/reports`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "t12", label, metadata: { lineItems: t12Data.lineItems.length } }),
+      body: JSON.stringify({
+        type: "t12",
+        label,
+        metadata: { lineItems: t12Data.lineItems.length },
+        processedData: { data: t12Data },
+      }),
     });
     setSavedToLibrary(true);
   }

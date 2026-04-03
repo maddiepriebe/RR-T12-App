@@ -113,6 +113,7 @@ function RentCompsPage() {
               compCount: compsData.comps.filter((c) => !c.isSubject).length,
               subject: compsData.subjectProperty?.propertyName ?? null,
             },
+            processedData: { data: compsData },
           }),
         }).then(() => setSavedToLibrary(true)).catch(() => {});
       }

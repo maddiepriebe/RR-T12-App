@@ -103,10 +103,16 @@ export default function RentRollPage() {
   async function saveToLibrary() {
     if (!selectedPropertyId) return;
     const label = rrFile?.name || "Rent Roll";
+    const format = yardiData ? "yardi" : "generic";
     await fetch(`/api/properties/${selectedPropertyId}/reports`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "rentroll", label, metadata: yardiData ? { format: "yardi", units: yardiData.totalUnits } : { format: "generic" } }),
+      body: JSON.stringify({
+        type: "rentroll",
+        label,
+        metadata: { format, units: yardiData?.totalUnits ?? rrData?.units.length ?? null },
+        processedData: { format, data: yardiData ?? rrData },
+      }),
     });
     setSavedToLibrary(true);
   }

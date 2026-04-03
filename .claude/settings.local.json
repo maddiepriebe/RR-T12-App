@@ -30,7 +30,16 @@
       "Bash(rm /Users/madelinepriebe/.git/worktrees/adoring-joliot/index.lock)",
       "Bash(git push:*)",
       "Bash(GIT_DIR=/Users/madelinepriebe/.git/worktrees/adoring-joliot GIT_WORK_TREE=/Users/madelinepriebe/RR-T12-App/.claude/worktrees/adoring-joliot git add -A)",
-      "Bash(GIT_DIR=/Users/madelinepriebe/.git/worktrees/adoring-joliot GIT_WORK_TREE=/Users/madelinepriebe/RR-T12-App/.claude/worktrees/adoring-joliot git status --short)"
+      "Bash(GIT_DIR=/Users/madelinepriebe/.git/worktrees/adoring-joliot GIT_WORK_TREE=/Users/madelinepriebe/RR-T12-App/.claude/worktrees/adoring-joliot git status --short)",
+      "Bash(GIT_DIR=/Users/madelinepriebe/.git/worktrees/adoring-joliot GIT_WORK_TREE=/Users/madelinepriebe/RR-T12-App/.claude/worktrees/adoring-joliot git push origin claude/adoring-joliot)",
+      "Bash(GIT_DIR=/Users/madelinepriebe/.git/worktrees/adoring-joliot GIT_WORK_TREE=/Users/madelinepriebe/RR-T12-App/.claude/worktrees/adoring-joliot git log origin/main..HEAD --oneline)",
+      "Bash(GIT_DIR=/Users/madelinepriebe/.git/worktrees/adoring-joliot GIT_WORK_TREE=/Users/madelinepriebe/RR-T12-App/.claude/worktrees/adoring-joliot git checkout main)",
+      "Bash(GIT_DIR=/Users/madelinepriebe/.git/worktrees/adoring-joliot GIT_WORK_TREE=/Users/madelinepriebe/RR-T12-App/.claude/worktrees/adoring-joliot git merge claude/adoring-joliot --ff-only)",
+      "Bash(GIT_DIR=/Users/madelinepriebe/.git/worktrees/adoring-joliot GIT_WORK_TREE=/Users/madelinepriebe/RR-T12-App/.claude/worktrees/adoring-joliot git push origin main)",
+      "Bash(GIT_DIR=/Users/madelinepriebe/.git/worktrees/adoring-joliot GIT_WORK_TREE=/Users/madelinepriebe/RR-T12-App/.claude/worktrees/adoring-joliot git add drizzle.config.ts)",
+      "Bash(GIT_DIR=/Users/madelinepriebe/.git/worktrees/adoring-joliot GIT_WORK_TREE=/Users/madelinepriebe/RR-T12-App/.claude/worktrees/adoring-joliot git push origin claude/adoring-joliot:main)",
+      "Bash(GIT_DIR=/Users/madelinepriebe/.git/worktrees/adoring-joliot GIT_WORK_TREE=/Users/madelinepriebe/RR-T12-App/.claude/worktrees/adoring-joliot git add tsconfig.json)",
+      "Bash(GIT_DIR=/Users/madelinepriebe/.git/worktrees/adoring-joliot GIT_WORK_TREE=/Users/madelinepriebe/RR-T12-App/.claude/worktrees/adoring-joliot git add app/properties/[id]/page.tsx app/rent-comps/page.tsx)"
     ]
   }
 }

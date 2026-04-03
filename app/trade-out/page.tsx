@@ -187,13 +187,15 @@ export default function TradeOutPage() {
 
   async function saveToLibrary() {
     if (!selectedPropertyId) return;
+    const periodLabelsSaved = periods.filter((p) => p.file).map((p) => p.label);
     await fetch(`/api/properties/${selectedPropertyId}/reports`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         type: "tradeout",
-        label: `Trade-Out (${periods.filter((p) => p.file).length} periods)`,
-        metadata: { periods: periods.filter((p) => p.file).map((p) => p.label), unitCount: tradeOuts.length },
+        label: `Trade-Out (${periodLabelsSaved.length} periods)`,
+        metadata: { periods: periodLabelsSaved, unitCount: tradeOuts.length },
+        processedData: { tradeOuts, planSummary, periodLabels: periodLabelsSaved },
       }),
     });
     setSavedToLibrary(true);
