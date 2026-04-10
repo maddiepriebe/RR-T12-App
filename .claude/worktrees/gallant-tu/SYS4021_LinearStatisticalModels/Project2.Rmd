@@ -1,0 +1,405 @@
+---
+title: "Project 2"
+author: "Maddie Priebe and Carly Elbaum"
+date: "December 8, 2025"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+require("knitr")
+datadir <- "/Users/madelinepriebe/SYS4021_LinearStatisticalModels/Project2"
+sourcedir <-"/Users/madelinepriebe/SYS4021_LinearStatisticalModels/Project2"
+opts_knit$set(root.dir = sourcedir)
+library(forecast)
+library(mtsdi)
+library(MTS)
+```
+
+# Load data and impute missing values
+```{r cars}
+setwd(datadir)
+
+airquality = read.csv('AirQualityUCI.csv')
+
+# replace -200 with NA
+airquality[airquality == -200] <- NA
+
+# convert integer type to numeric
+intcols = c(4,5,7,8,9,10,11,12)
+for(i in 1:length(intcols)){
+  airquality[,intcols[i]] <- as.numeric(airquality[,intcols[i]])
+}
+
+setwd(sourcedir)
+
+# create new data frame with just CO and NO2
+AQdata = airquality[,c(3,10)]
+
+# impute missing air quality data
+f <- ~ CO.GT. + NO2.GT.
+t <- c(seq(1,dim(AQdata)[1],1))
+i <- mnimput(f, AQdata, eps=1e-3, ts=TRUE, method='gam', ga.control=list(formula=paste(names(AQdata)[c(1:2)],'~ns(t,2)')))
+
+# set airquality to imputed data
+AQdata <- i$filled.dataset
+
+# aggregate to daily maxima for model building
+dailyAQ <- aggregate(AQdata, by=list(as.Date(airquality[,1],"%m/%d/%Y")), FUN=max)
+```
+
+Utilizing the time series methods learned in class to develop univariate models of daily maximum ambient nitrogen dioxide (NO2) concentrations.
+
+## Question 1: Building Univariate Time Series Models
+
+Build a time series model of daily maximum nitrogen dioxide (NO2) concentrations using all but the last 7 days of observations
+
+The first step is to filter the data for all observations except the last 7 days. 
+```{r}
+# count onervations 
+n <- nrow(AQdata)
+n
+# filter out the last 7
+AQ_sin7 <- AQdata[1:(n-7),] 
+```
+
+Next we visualize the data to identify potential patterns and assess what we are working with 
+
+```{r}
+ts.NO2 <- ts(AQ_sin7$NO2.GT.)
+autoplot(ts.NO2, ylab = "Daily NO2 Concentrations", xlab = "Day")
+```
+
+### a ) Seasonal Components 
+We performed spectral analysis and used a periodogram to discover the periodic components of this time series. The periodogram plots the squared amplitude (smoothed) of the data with sinusoids oscillating at a frequency of $f_j = j/n$ where $n$ is the number of time steps in the time series. We chose this method over using dummy variables because we have daily data, which typically requires many additional variables. This is a trade off because dummy variables offer easier interpretation, but trigonometric models have better parsimony. Peaks in the periodogram at some frequency indicate strong (high amplitude) sinusoid at that frequency, suggesting there is seasonality at the corresponding period.
+
+```{r}
+NO2.pg <- spec.pgram(ts.NO2, spans=9, demean=T, log='no')
+NO2.spec <- data.frame(NO2.pg$freq, spec=NO2.pg$spec)
+
+# Get top peaks (limit to available rows)
+n_peaks <- min(5, nrow(NO2.spec))
+top_indices <- order(NO2.spec$spec, decreasing=TRUE)[1:n_peaks]
+peaks <- NO2.spec[top_indices, ]
+peaks$spec <- 1/peaks$NO2.pg.freq
+peaks <- transform(peaks, period = 1/NO2.pg.freq)
+print(peaks)
+
+# Plot with peak annotation
+ggplot(NO2.spec) + 
+  geom_line(aes(x=NO2.pg.freq, y=spec)) +
+  geom_vline(xintercept = peaks$freq, color = "red", 
+             linetype = "dashed", alpha = 0.5) +
+  ggtitle("Smooth Periodogram of NO2 Concentrations") + 
+  xlab("Frequency") + 
+  ylab("Squared Amplitude")
+```
+Results from the periodogram analysis revealed two main findings:
+
+1. **Dominant low-frequency component** (frequency $≈ 0.0002$, period $≈ 4,688 days$): This captures the long-term trend in the data rather than true seasonality, representing approximately 12.8 years of cyclical behavior.
+2. **Significant monthly seasonality** (frequencies around 0.041-0.042, periods of 24 days): The periodogram shows clear, strong peaks at approximately 24-day cycles, indicating monthly seasonal patterns in NO2 concentrations. This is the primary seasonal component we will model.
+
+The spectral analysis confirms that NO2 concentrations exhibit monthly seasonality, which is consistent with environmental factors such as weather patterns, traffic cycles, and industrial activity that tend to follow monthly rhythms. Based on these findings, we incorporated harmonic terms with a period of approximately 24 days into our time series model to capture this seasonal variation.
+
+### b ) Trend Discovery
+Based on this plot, it appears that there is a long term upward trend. To analyze this trend, we looked at a general linear model. 
+
+```{r}
+NO2_df <- data.frame(Day = 1:length(ts.NO2), NO2 = as.numeric(ts.NO2))
+ggplot(NO2_df, aes(x=Day, y=NO2)) + 
+  geom_line() + 
+  stat_smooth(method="lm", col="red") + 
+  ylab("NO2 Concentration") + 
+  xlab("Day")
+```
+Based on the time series plot, there is evidence of a long-term upward trend in NO2 concentrations over the observation period. The red trend line shows NO2 levels gradually increasing over time.
+
+To model this trend, we fitted a linear regression model with Day as a predictor:
+```{r}
+# Fit the linear trend model
+trend_model <- lm(NO2 ~ Day, data = NO2_df)
+
+# View the results
+summary(trend_model)
+```
+
+The linear trend was statistically significant ($\beta_1 = 0.00634$, $Std Err = 0.00016$, $p < 2×10^{-16}$), confirming that NO2 concentrations increased by approximately $0.0063$ ppb per day, or about $2.3$ ppb per year. The intercept of $80.6$ ppb represents the estimated baseline NO2 concentration at the start of the observation period. The highly significant p-value (p < 0.001) provides strong statistical evidence that this is a real trend rather than random variation.
+
+### c) Autoregressive and Moving Average Components 
+```{r}
+ggAcf(ts.NO2)
+ggPacf(ts.NO2)
+```
+**ACF Analysis**: The ACF plot exhibits a sinusoidal (wave-like) pattern with peaks occurring at regular intervals around every 24 lags. This is a strong indicator of:
+1. Seasonality in the data: The periodic pattern in the ACF confirms the seasonal component we identified in the periodogram (24-day cycle).
+2. Non-stationarity: The slow decay and persistent autocorrelation indicates the presence of a trend component, as this series has not yet been detrended or deseasonalized.
+**PACF Analysis**: The PACF plot shows a very strong spike at lag 1 (~0.88), with smaller but significant spikes at lags 2 and 3, followed by a general cutoff. Additionally, there are several significant spikes around lags 18-25. This pattern indicates:
+1. Strong AR(1) component: The dominant lag-1 spike suggests high day-to-day persistence in NO2 concentrations
+2. Seasonal structure: The spikes around lags 18-25 align with the 24-day seasonal cycle identified in the spectral analysis
+These patterns confirm that the raw time series contains both AR structure and seasonal components that need to be modeled.
+
+```{r}
+adf.test(ts.NO2)
+```
+Since the p-value < 0.05 for the Augmented Dickey-Fuller test on the raw series, we would reject the null hypothesis of a unit root and accept the alternate hypothesis, suggesting the series is stationary. However, this result contradicts our visual inspection and ACF/PACF diagnostics, which clearly showed an upward trend and sinusoidal autocorrelation pattern. The ADF test can sometimes be misleading for trend-stationary series or long time series with strong mean reversion. Therefore, we proceeded with first differencing (d=1) based on the ACF/PACF evidence.
+
+To properly identify AR and MA orders, we first need to remove the trend and seasonal components, then examine the ACF and PACF of the residuals:
+
+```{r}
+NO2.diff <- diff(ts.NO2)
+autoplot(NO2.diff, ylab='NO2 First Differences', xlab="")
+```
+```{r}
+adf.test(NO2.diff)
+```
+Since the p-value <0.05 for the Augmented Dickey-Fuller test on the first difference, we reject the null hypothesis of a unit root and accept the alternate hypothesis. This means that the differenced series does not have a trend and fluctuates around a constant level, indicating that it is stationary.
+
+```{r}
+# ACF and PACF of differenced series
+acf(NO2.diff, main="ACF of First Differences")
+pacf(NO2.diff, main="PACF of First Differences")
+```
+The ACF and PACF of the first differenced series exhibited key features that we must take into consideration when building our model.
+**ACF Analysis**: The ACF plot has a significant spike at lag 0 before quickly tapering off to a weak sinusoidal pattern. It has another few significant spikes at lags 23-25 with the largest at lag 24. 
+**PACF Analysis**: The PACF has a large positive spike at lag 1 and a significant negative wave from lags 3-24 with another large positive spike at lag 24.
+These findings are consistent with seasonality remaining in the data. Next, we will tackle adjusting for seasonality.
+
+```{r}
+NO2.diff.seasonal <- diff(NO2.diff, lag=24)
+autoplot(NO2.diff.seasonal, ylab='NO2 Seasonal Differences', xlab="")
+```
+```{r}
+# Check ACF/PACF
+acf(NO2.diff.seasonal, main="ACF after First & Seasonal Differencing")
+pacf(NO2.diff.seasonal, main="PACF after First & Seasonal Differencing")
+```
+**ACF after both differences**: Almost all of the lags fall within the confidence bounds. There is one significant negative spike around lag 24 (this is expected from the seasonal differencing operation). The series appears to be stationary and there is no longer a strong sinusoidal pattern.
+**PACF after both differences**: Almost all lags are within the confidence bounds, with a few small spikes around lags 19-24. The significant spike near lag 24 is likely an artifact of the seasonal differencing operation. There is no strong evidence of remaining AR structure.
+Based on these results, after differencing (d=1) and seasonal differencing (D=1, s=24), there is no strong AR component remaining. The ACF and PACF suggest the differencing has removed most of the temporal structure. However, the spike at lag 24 in the ACF may indicate a seasonal MA(1) component could be beneficial, suggesting a model of the form ARIMA(0,1,0)(0,1,1)[24] or similar.
+
+### d) Alternative Model Assessment
+We investigated several models to begin with based on the analysis that we performed up to this point. 
+
+```{r}
+# Fit different candidate models
+model1 <- arima(ts.NO2, order=c(0,1,0), seasonal=c(0,1,0))
+model2 <- arima(ts.NO2, order=c(0,1,1), seasonal=c(0,1,1))
+model3 <- arima(ts.NO2, order=c(1,1,0), seasonal=c(0,1,1))
+model4 <- arima(ts.NO2, order=c(0,1,1), seasonal=c(1,1,0))
+```
+
+```{r}
+# Compare using AIC and BIC (lower is better)
+cat("Model 1 - ARIMA(0,1,0)(0,1,0)[24]:\n")
+cat("AIC:", AIC(model1), "BIC:", BIC(model1), "\n\n")
+
+cat("Model 2 - ARIMA(0,1,1)(0,1,1)[24]:\n")
+cat("AIC:", AIC(model2), "BIC:", BIC(model2), "\n\n")
+
+cat("Model 3 - ARIMA(1,1,0)(0,1,1)[24]:\n")
+cat("AIC:", AIC(model3), "BIC:", BIC(model3), "\n\n")
+
+cat("Model 4 - ARIMA(0,1,1)(1,1,0)[24]:\n")
+cat("AIC:", AIC(model4), "BIC:", BIC(model4), "\n\n")
+```
+Now we perform model diagnostics with the first iteration of models that we built. 
+
+```{r}
+m1 <- ggplot() + 
+  geom_point(aes(x=fitted(model1), y=model1$residuals)) +
+  ggtitle("Model 1 - ARIMA(0,1,0)(0,1,0)[24] Fitted vs. Residual")
+
+m2 <- ggplot() + 
+  geom_point(aes(x=fitted(model2), y=model2$residuals)) +
+  ggtitle("Model 2 - ARIMA(0,1,1)(0,1,1)[24] Fitted vs. Residual")
+
+m3 <- ggplot() + 
+  geom_point(aes(x=fitted(model3), y=model3$residuals)) +
+  ggtitle("Model 3 - ARIMA(1,1,0)(0,1,1)[24] Fitted vs. Residual")
+
+m4 <- ggplot() + 
+  geom_point(aes(x=fitted(model4), y=model4$residuals)) +
+  ggtitle("Model 4 - ARIMA(0,1,1)(1,1,0)[24] Fitted vs. Residual")
+
+ggarrange(m1, m2, m3, m4)
+```
+**Fitted vs Residual Plot Analysis**: 
+Model 1 - ARIMA(0,1,0)(0,1,0)[24]:
+- Clear downward trend in residuals as fitted values increase
+- Strong pattern indicates this model is inadequate
+- The model is systematically over-predicting at higher values
+
+Model 2 - ARIMA(0,1,1)(0,1,1)[24]:
+- Slight downward trend remains
+- Better than Model 1, but still shows some pattern. Improved, but not ideal.
+
+Model 3 - ARIMA(1,1,0)(0,1,1)[24]:
+- Residuals appear randomly scattered around 0
+- No clear pattern or trend
+- Good constant variance (homoscedasticity)
+- This looks like the best model so far
+
+Model 4 - ARIMA(0,1,1)(1,1,0)[24]:
+- Also very good! Similar to Model 3
+- Residuals randomly scattered
+- No obvious patterns
+
+Models 3 and 4 are the best candidates based on residual plots and AIC/BIC criteria. Now we will refine our analysis to these two models for further investigation.
+
+```{r}
+m3_qp <- qplot(sample=model3$residuals) + stat_qq_line(color="red") +
+  ggtitle("Model 3 - Fitted vs Residuals")
+
+m4_qp <- qplot(sample=model4$residuals) + stat_qq_line(color="red") +
+  ggtitle("Model 4 - Fitted vs Residuals")
+
+ggarrange(m3_qp, m4_qp)
+```
+The Q-Q plots for both Model 3 and Model 4 showed residuals generally following the normal distribution line, with a lot of deviation in the tails indicating heavier tails than expected under normality. This behavior suggests that normality is not a reasonable assumption. However, both models appear to have very similar behavior and are about equally gaussian. 
+
+```{r}
+# Model 3 Diagnostics 
+ggtsdiag(model3, gof.lag=24)
+# Model 4 Diagnostics
+ggtsdiag(model4, gof.lag=24)
+```
+```{r}
+# Model 3 Diagnostics 
+ggtsdiag(model3, gof.lag=10)
+# Model 4 Diagnostics
+ggtsdiag(model4, gof.lag=10)
+```
+The p-values for the Ljung-Box statistic are <0.05, indicating that autocorrelation is significant 
+
+Now we will run auto.arima to find the best model and compare it to the ones we have already tested. 
+
+```{r}
+auto <- auto.arima(diff(ts.NO2), seasonal = TRUE)
+summary(auto)
+```
+The auto.arima chose a significantly more complex model that we did. 
+
+```{r}
+# Create time series with explicit seasonality
+ts.NO2_seasonal <- ts(as.numeric(ts.NO2), frequency = 24)
+
+auto_seasonal <- auto.arima(ts.NO2_seasonal, 
+                            seasonal = TRUE,
+                            trace = TRUE, 
+                            approximation = FALSE)
+summary(auto_seasonal)
+```
+
+By forcing seasonality, the auto.arima function selected the best model to be ARIMA(1,0,0)(2,1,0)[24] . The AIC is an improvement over model3 (AIC: 83356.02) and model4 (AIC: 83356.02) from above as well as the auto.arima function on the raw series. We now explore further diagnosis of this model to ensure it is an improvement over the ones tested previously.
+
+```{r}
+ggtsdiag(auto_seasonal, gof.lag=24)
+```
+
+```{r}
+as_diag <- ggplot() + 
+  geom_point(aes(x=fitted(auto_seasonal), y=auto_seasonal$residuals)) +
+  ggtitle("Auto Seasonal - Fitted vs. Residual")
+as_diag
+```
+The auto_seasonal model outperformed all manually specified alternatives across every evaluation metric, demonstrating superior ability to capture the temporal patterns in NO2 concentrations while maintaining parsimony. The model's residuals satisfied all key assumptions (independence, constant variance, approximate normality), confirming its adequacy for forecasting purposes.
+Therefore, we select the auto_seasonal model as our final specification for predicting daily maximum NO2 concentrations for the next 7 days.
+
+### e) Forecasting
+```{r}
+trailing_7 <- tail(AQdata$NO2.GT., 7)
+forecast_auto <- forecast(auto_seasonal, h=7)
+forecast_values <- as.numeric(forecast_auto$mean)
+mse <- mean((trailing_7 - forecast_values)^2)
+rmse <- sqrt(mse)
+mae <- mean(abs(trailing_7 - forecast_values))
+
+cat("Mean Squared Error (MSE):", mse, "\n")
+cat("Root Mean Squared Error (RMSE):", rmse, "\n")
+cat("Mean Absolute Error (MAE):", mae, "\n")
+```
+Now we can plot the difference between the forecasts and true values.
+
+```{r}
+results_table <- data.frame(
+  Day = 1:7,
+  Actual = trailing_7,
+  Forecast = forecast_values,
+  Error = trailing_7 - forecast_values,
+  Squared_Error = (trailing_7 - forecast_values)^2,
+  Abs_Error = abs(trailing_7 - forecast_values),
+  Lower_95 = as.numeric(forecast_auto$lower[,2]),
+  Upper_95 = as.numeric(forecast_auto$upper[,2])
+)
+
+print(results_table)
+```
+
+
+```{r}
+ggplot(results_table, aes(x = Day)) +
+  geom_line(aes(y = Actual, color = "Actual"), size = 1.2) +
+  geom_point(aes(y = Actual, color = "Actual"), size = 3) +
+  geom_line(aes(y = Forecast, color = "Forecast"), size = 1.2) +
+  geom_point(aes(y = Forecast, color = "Forecast"), size = 3) +
+  geom_ribbon(aes(ymin = Lower_95, ymax = Upper_95), alpha = 0.2, fill = "blue") +
+  scale_color_manual(values = c("Actual" = "black", "Forecast" = "blue")) +
+  labs(title = "7-Day NO2 Forecast vs Actual Values",
+       subtitle = paste("MSE =", round(mse, 2)),
+       x = "Day",
+       y = "NO2 Concentration (ppb)",
+       color = "Series") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+```{r}
+# Add last 50 days of history for context
+n_history <- 50
+history <- tail(as.numeric(ts.NO2), n_history)
+history_days <- (length(ts.NO2) - n_history + 1):length(ts.NO2)
+
+# Create plot with history
+plot_data <- data.frame(
+  Day = c(history_days, (length(ts.NO2) + 1):(length(ts.NO2) + 7)),
+  Value = c(history, trailing_7),
+  Type = c(rep("Historical", n_history), rep("Actual", 7))
+)
+
+forecast_data <- data.frame(
+  Day = (length(ts.NO2) + 1):(length(ts.NO2) + 7),
+  Forecast = forecast_values,
+  Lower = as.numeric(forecast_auto$lower[,2]),
+  Upper = as.numeric(forecast_auto$upper[,2])
+)
+
+ggplot() +
+  geom_line(data = plot_data, aes(x = Day, y = Value, linetype = Type)) +
+  geom_line(data = forecast_data, aes(x = Day, y = Forecast), 
+            color = "blue", size = 1.2) +
+  geom_point(data = forecast_data, aes(x = Day, y = Forecast), 
+             color = "blue", size = 3) +
+  geom_ribbon(data = forecast_data, 
+              aes(x = Day, ymin = Lower, ymax = Upper), 
+              alpha = 0.2, fill = "blue") +
+  geom_vline(xintercept = length(ts.NO2), linetype = "dashed", color = "red") +
+  annotate("text", x = length(ts.NO2), y = max(plot_data$Value), 
+           label = "Forecast Start", vjust = -0.5, color = "red") +
+  labs(title = "NO2 Forecast with Historical Context",
+       subtitle = paste("MSE =", round(mse, 2)),
+       x = "Day",
+       y = "NO2 Concentration (ppb)",
+       linetype = "") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+We forecasted the next 7 days using our selected ARIMA(1,0,0)(2,1,0)[24] model, achieving a Mean Squared Error (MSE) of 2,450.62. The Root Mean Squared Error (RMSE) of 49.50 ppb represents the typical forecast error magnitude.
+
+The model systematically under-predicted NO2 concentrations during the test period, with errors ranging from 28.2 to 65.9 ppb. This under-prediction occurred because the test period exhibited elevated NO2 concentrations relative to the recent historical trend. All actual values fell within the 95% prediction intervals, indicating that while point forecasts were biased low, the model appropriately captured forecast uncertainty.
+
+The increasing error over the 7-day horizon (Day 1: 28.2 ppb to Day 7: 65.9 ppb) is characteristic of time series forecasts, where uncertainty compounds as the forecast horizon extends.
+
+## Question 2: Simulating Univariate Time Series Models
+
+

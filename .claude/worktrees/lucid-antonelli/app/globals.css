@@ -1,0 +1,86 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+:root {
+  --navy-950: #061629;
+  --navy-900: #0a2240;
+  --navy-800: #10304d;
+  --navy-700: #1a3f5f;
+  --gold-500: #eebb38;
+  --gold-400: #f1c757;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background-color: #f8fafc;
+  color: #1a1a2e;
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.finance-table {
+  @apply w-full text-sm border-collapse;
+}
+
+.finance-table th {
+  @apply bg-navy-800 text-white font-semibold px-3 py-2 text-left text-xs uppercase tracking-wider;
+}
+
+.finance-table td {
+  @apply px-3 py-1.5 border-b border-gray-100;
+}
+
+.finance-table tr:nth-child(even) td {
+  @apply bg-gray-50;
+}
+
+.finance-table .row-subtotal td {
+  @apply font-semibold bg-navy-50 border-t border-navy-200;
+}
+
+.finance-table .row-total td {
+  @apply font-bold bg-navy-100 border-t-2 border-navy-400;
+}
+
+.finance-table .row-header td {
+  @apply font-bold text-navy-800 bg-gray-100 uppercase text-xs tracking-wider pt-4;
+}
+
+.upload-zone {
+  @apply border-2 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer transition-all;
+}
+
+.upload-zone:hover,
+.upload-zone.drag-active {
+  @apply border-gold-500 bg-gold-50;
+}
+
+.upload-zone.has-file {
+  @apply border-green-400 bg-green-50;
+}
+
+.btn-primary {
+  @apply bg-navy-700 hover:bg-navy-800 text-white font-semibold px-6 py-2.5 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.btn-gold {
+  @apply bg-gold-500 hover:bg-gold-600 text-navy-950 font-semibold px-6 py-2.5 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.btn-outline {
+  @apply border-2 border-navy-700 text-navy-700 hover:bg-navy-700 hover:text-white font-semibold px-6 py-2.5 rounded-lg transition-colors;
+}
+
+.card {
+  @apply bg-white rounded-xl shadow-sm border border-gray-200 p-6;
+}
+
+.section-header {
+  @apply text-xs font-bold uppercase tracking-widest text-navy-600 mb-3;
+}

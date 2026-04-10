@@ -1,0 +1,423 @@
+---
+title: 'SYS 4021: Project 1'
+author: "Maddie Priebe and Carly Elbaum"
+date: "2025-11-07"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+**PRE PROCESSING**
+Data Preparation: we imported the data and prepared it for analysis by re-coding the categorical and ordinal variables to factors.
+
+## Setup
+```{r, echo=FALSE}
+library(data.table)
+library(plyr)
+library(scales)
+library(grid)
+library(ggpubr)
+install.packages('glmnet')
+library(glmnet)
+library(here)
+library(dplyr)
+library(ggfortify)
+library(tidyverse)
+library(car)       
+library(MASS) 
+library(lindia)
+#install.packages("performance")
+library(performance)  # for model diagnostics
+library(broom)        # for tidy model summaries
+library(ggplot2)
+library(psych)
+install.packages('caret')
+library(caret) 
+set.seed(42)
+```
+
+# Functions to Import Data and Create Data Frame from Multiple Files
+```{r, echo=FALSE}
+# function to input files into a list
+file.inputl <- function(my.path)
+{
+  my.dir <- getwd()
+  setwd(my.path)
+  my.files <- list.files(pattern=".csv")
+  acts <- lapply(my.files,read.csv)
+  setwd(my.dir)
+  return(acts)
+}
+
+# Function to create a data frame as the combination of multiple data frames in a list.
+combine.data <- function(Data.List, Vars)
+{
+  DF <- rbind(Data.List[[1]][, Vars])
+  for(i in 2:length(Data.List))
+  {
+    DF <- rbind(DF, Data.List[[i]][, Vars])
+  }
+  DF
+}
+```
+
+# Import Data 
+```{r}
+# change file path to match the the local location of the data
+my.data <- file.inputl("~/SYS4021_LinearStatisticalModels/traindata2024")
+
+# create data frame
+data <- combine.data(my.data)
+```
+
+# Prepare Data for Analysis 
+```{r}
+# Create Casualty column that combines injuries and deaths 
+data$CASUALTY <- data$TOTINJ + data$TOTKLD 
+
+# filter for casualties > 1, bad accidents
+df <- subset(data , CASUALTY >= 1)
+
+# Recoding for interpretability 
+
+# Recode Categorical 'Type'
+df$TYPE <- factor(df$TYPE, labels = c("Derailment", "HeadOn", "Rearend", "Side", "Raking", "BrokenTrain", "Hwy-Rail", "GradeX", "Obstruction", "Explosive", "Fire","Other", "SeeNarrative" ))
+
+# Recode Categorical 'TypeQ'
+df$TYPEQ <- factor(df$TYPEQ, labels = c("NA", "Freight", "Passenger", "Commuter", "Work", "Single", "CutofCars", "Yard", "Light", "Maint", "MaintOfWay", "Passenger", "Commuter", "ElectricMulti", "ElectricMulti"))
+
+# Recode Categorical 'Weather'
+df$WEATHER <- factor(df$WEATHER, labels = c("Clear", "Cloudy", "Rain", "Fog", "Sleet", "Snow"))
+
+# Recode Categorical 'Method'
+df$METHOD <- factor(as.integer(df$METHOD), levels = 1:16, labels = c("ATCS", "Auto Rrain Control", "Auto Train Stop", "Cab Signals", "Traffic Control", "Interlocking", "Automatic Block Rules", "Current of Traffic", "Time/Table/Train Orders", "Track Warrant Control", "Direct Traffic Control", "Yard Limits", "Special Instructions", "Other than Main Track", "Other", "Positive Train Control"))
+
+# Recode Categorical 'Visibility'
+df$VISIBLTY <- factor(df$VISIBLTY, labels = c("Dawn", "Day", "Dusk", "Dark"))
+
+# Recode CAUSE to aggreate by category
+df$Cause <- rep(NA, nrow(df))
+
+df$Cause[which(substr(df$CAUSE, 1, 1) == "M")] <- "M"
+df$Cause[which(substr(df$CAUSE, 1, 1) == "T")] <- "T"
+df$Cause[which(substr(df$CAUSE, 1, 1) == "S")] <- "S"
+df$Cause[which(substr(df$CAUSE, 1, 1) == "H")] <- "H"
+df$Cause[which(substr(df$CAUSE, 1, 1) == "E")] <- "E"
+
+df$Cause <- factor(df$Cause)
+
+df$TRKCLAS = ordered(df$TRKCLAS)
+
+# Filter Data Frame to Select Variables of Interest
+vars <- c("CASUALTY", "ACCDMG", "TYPE", "TYPEQ", "Cause", "WEATHER", "VISIBLTY", "TEMP", "TRNSPD", "METHOD", "TRKCLAS")
+
+df <- df[, vars]
+```
+
+Data Visualization: The first step for generating a well formed hypothesis is to visualize the data and get a sense of the underlying relationships between variables. To do this we create plots with both quantitative and qualitative variables. 
+
+
+# PART 1: Generate Hypotheses
+
+Per the project, we state testable hypotheses for **damage** (extreme accidents) and **casualties** (>=1).
+
+## ACCDMG HYPOTHESES
+1: Train Operator - Human Factor (Cause = H) accidents have higher damages among extreme accidents than other causes 
+
+Why is this actionable: This would suggest that the FRA could focus on training procedures and human-error mitigations to prevent these high cost tail events.
+
+Null (H_0): In the extreme damage subset, mean(ACCDMG) for Cause = H equals mean(ACCDMG) of other Causes, \mu_H = \mu_{others}
+Alt (H_1): In the extreme damage subset, mean(ACCDMG) for Cause = H is greater than other Causes,  H_1: \mu_H > \mu_{others}
+
+How did we reach this hypothesis? 
+
+# Median and Mean Accident Damage by Cause Group**
+```{r, echo=FALSE}
+df %>%
+  group_by(Cause) %>%
+  summarise(med_dmg = median(ACCDMG, na.rm = TRUE), avg_dmg = mean(ACCDMG, na.rm = TRUE))
+```
+The median damage is significantly higher in 'S' cause accidents, suggesting that there are differences in accident damage associated with accident type.
+
+# Accident Damage by Cause Group
+```{r}
+ggplot(df, aes(x = Cause, y = ACCDMG, fill = Cause)) +
+  geom_boxplot(outlier.alpha = 0.3) +
+  scale_y_continuous(labels = scales::dollar) +
+  labs(title = "Accident Damage by Cause Group",
+       x = "Primary Cause Category",
+       y = "Total Damage ($)") +
+  theme_minimal()
+```
+From this plot, we can see that there are significant outliers in the H category, suggesting we should evaluate the rlationship between cause category and accident damage. This lead to our first hypothesis. 
+
+
+2: Train Speed (TRNSPD) is associated with a steeper increase in damages for Human and Miscelaneous Caused Accidents
+
+Why is this actionable: Speed guidelines and operational rules can be esaily altered and the FRA could create stronger penalties for those who do not follow the rules. This is especcially prevalent in Human Caused Accidents because humans can be told what to do.
+H_0: \beta_{TRNSPD:CauseH} = \beta_{TRNSPD:CauseM} = 0; \quad H_1: > 0.
+Null (H_0): \beta_{TRNSPD:CauseH} = \beta_{TRNSPD:CauseM} = 0
+Alt (H_1): \beta_{TRNSPD:CauseH}, \beta_{TRNSPD:CauseM} > 0
+
+**Train Speed vs Accident Damage**
+```{r}
+ggplot(df, aes(x = TRNSPD, y = ACCDMG)) +
+  geom_point(alpha = 0.25) +
+  labs(title = "Train Speed vs. Damage",
+       x = "Train Speed (mph)", y = "Total Damage ($)") +
+  scale_y_continuous(labels = scales::dollar) +
+  theme_minimal()
+```
+
+How did we reach this hypothesis? 
+
+
+
+## Casualties Hypotheses
+1: Accidents that occur in adverse weather conditions in the Dark or at Dawn result in more casualties
+
+Why is this actionable: The FRA could reduce casualties by improving lighting, visibility, or train-control rules in the dark and in adverse weather conditions. They cannot control the weather, but they can control how the operators and engineers respond to such. 
+
+Null (H_0): mean casualties between WEATHER:VISBLTY are equal 
+Alt (H_1): mean casualties between WEATHER:VISBLTY are not equal 
+
+How did we reach this hypothesis? 
+# Median and Mean Damage by Weather
+```{r, echo=FALSE}
+df %>%
+  group_by(WEATHER) %>%
+  summarise(med_dmg = median(ACCDMG, na.rm = TRUE), avg_dmg = mean(ACCDMG, na.rm = TRUE))
+
+```
+
+# Visualization of Weather and Visibility
+```{r, echo=FALSE}
+df %>%
+  group_by(WEATHER, VISIBLTY) %>%
+  summarise(mean_cas = mean(CASUALTY, na.rm = TRUE)) %>%
+  ggplot(aes(x = WEATHER, y = mean_cas, fill = VISIBLTY)) +
+  geom_col(position = "dodge") +
+  labs(title = "Average Casualties by Weather and Visibility",
+       x = "Weather Condition", y = "Average Casualties",
+       fill = "Visibility") +
+  theme_minimal()
+```
+From this bar graph it appears that casualties are not evenly spread over weather and visibility conditions. Cloudy in the Dark and Rain at Dawn have visibly higher averages. This,coupled with our experience driving in adverse weather conditions (we are both from the North East), lead us to construct this hypothesis.
+
+
+2. Lower Class tracks are associated wih more casualties
+
+Why is this actionable: The FRA could choose to undertake track improvements and upgrades if there was a significant difference in safety. 
+
+Null (H_0): B_TRKCLASSi = 0
+Alt (H_1): B_TRKCLASSi < 0
+
+How did we reach this hypothesis? 
+```{r}
+ggplot(df, aes(factor(TRKCLAS), CASUALTY)) +
+  geom_boxplot() +
+  labs(x = "Track Class", y = "Casualties", 
+       title = "Casualties by Track Class")
+```
+
+
+**PART 2: ACCDMG ANALYSIS**
+*Extreme Damage Subset*
+```{r}
+Q3   <- quantile(df$ACCDMG, 0.75, na.rm = TRUE)
+IQRv <- IQR(df$ACCDMG, na.rm = TRUE)
+uw   <- Q3 + 1.5 * IQRv
+dx   <- subset(df, ACCDMG > uw & ACCDMG > 0)
+```
+
+# Main Effects Model - Stepwise Regression
+```{r}
+m_main <- lm(ACCDMG ~ (Cause + TYPE + WEATHER + VISIBLTY + TRKCLAS + TRNSPD), data=dx)
+m_step <- stepAIC(m_main, trace=0)
+summary(m_step)
+```
+# Diagnostics for Main Effects
+```{r}
+plot(m_step)
+```
+
+```{r}
+bc <- boxcox(m_step)
+```
+# Determine necessity for y-variable transform
+```{r}
+lambda_opt <- bc$x[which.max(bc$y)]
+lambda_opt
+```
+
+# Transform Response Variable (use for subsequent models)
+```{r}
+dx$ACCDMG_bc <- (dx$ACCDMG ^ lambda_opt - 1) / lambda_opt
+```
+
+# Retrain Mpdel
+```{r}
+m_main_transform <- lm(ACCDMG_bc ~ (Cause + TYPE + WEATHER + VISIBLTY + TRKCLAS + TRNSPD), data=dx)
+m_step_trns <- stepAIC(m_main_transform, trace=0)
+summary(m_step_trns)
+```
+
+```{r}
+plot(m_step_trns)
+```
+We applied a Box–Cox power transformation to the response variable (ACCDMG). The estimated λ = −0.30 corresponds to a transformation slightly stronger than a logarithm. The transformed model exhibited more normally distributed residuals and reduced heteroskedasticity, indicating that the Box–Cox correction improved model validity. The transformed model did not exhibit as strong predictive power as demonstrated by a reduction in adjusted R^2 and R^2. It is important to use a transform regardless of improvement in these metrics for the validity of the model. We make assumptions when we build models and if these assumptions are not confirmed by the data, any resulting model is not valid regardless of the R^2.
+
+# Interaction Model
+```{r}
+m_inter <- lm(ACCDMG_bc ~ (Cause + TYPE + WEATHER + VISIBLTY + TRKCLAS + TRNSPD)^2, data=dx)
+inter_step <- stepAIC(m_inter, trace=0)
+summary(inter_step)
+```
+
+```{r}
+plot(inter_step)
+```
+
+# Compare Main effects and Interaction Models
+```{r}
+AIC(inter_step, m_step_trns)
+anova(inter_step, m_step_trns)
+```
+The F-test compares whether those 130 new interactions in Model 2 (smaller model) significantly reduced residual error compared to Model 1 (larger model with interaction terms). We see that p = 0.2467 > 0.05, so the extra complexity does not significantly improve the model.
+
+# Look for Multicollinearity 
+```{r}
+vif(m_step_trns)
+```
+There is no concerning multicollinearity exhibited.
+
+# Lasso Regression - Main Effects
+```{r}
+# Build matrix for main effects 
+x <- model.matrix(ACCDMG_bc ~ Cause + TYPE + WEATHER + VISIBLTY + TRKCLAS + TRNSPD, data=dx)[,-1]
+y <- dx$ACCDMG_bc
+```
+
+
+```{r}
+# Run Lasso Regression, Plot Results
+lasso_cv <- cv.glmnet(x, y, alpha = 1, nfolds = 10)
+plot(lasso_cv)
+```
+
+```{r}
+# Lambda that minimizes Cross Validation error
+lasso_cv$lambda.min
+```
+
+```{r}
+# What were the important factors?
+min_cverr <- coef(lasso_cv, s = "lambda.min")
+coef_min <- data.frame(
+  factor = rownames(min_cverr),
+  estimate = as.numeric(min_cverr)
+)
+kept <- subset(coef_min, estimate != 0)
+kept
+```
+
+# Evaluate for predictive accuracy  
+```{r}
+trainIndex <- createDataPartition(y, p=0.8, list=FALSE)
+x_train <- x[trainIndex,]; y_train <- y[trainIndex]
+x_test  <- x[-trainIndex,]; y_test <- y[-trainIndex]
+
+fit_lasso <- glmnet(x_train, y_train, alpha=1, lambda=lasso_cv$lambda.min)
+pred <- predict(fit_lasso, newx=x_test)
+RMSE_1 <- sqrt(mean((y_test - pred)^2))
+R2_1 <- 1 - sum((y_test - pred)^2)/sum((y_test - mean(y_test))^2)
+c(RMSE=RMSE_1, R2=R2_1)
+```
+We used 10-fold cross-validation to tune the LASSO penalty parameter. Lasso Regression
+
+# Lasso Regression - Interaction
+```{r}
+# Build model matrix with interactions
+X <- model.matrix(
+  ACCDMG_bc ~ (TRNSPD + Cause + TYPE + WEATHER + VISIBLTY + TRKCLAS)^2,
+  data = dx)[, -1] 
+y <- dx$ACCDMG_bc
+```
+
+```{r}
+lasso_int_cv <- cv.glmnet(X, y, alpha = 1, nfolds = 10)
+plot(lasso_int_cv)
+```
+
+# Find Factors of Importance
+```{r}
+# What were the important factors?
+err <- coef(lasso_int_cv, s = "lambda.min")
+coef_min_int <- data.frame(
+  factor = rownames(err),
+  estimate = as.numeric(err)
+)
+kept_inter <- subset(coef_min_int, estimate != 0)
+kept_inter <- coef_min_int[order(-abs(coef_min_int$estimate)), ]  # sort by coef
+
+kept_inter
+```
+
+# Evaluate for predictive accuracy  
+```{r}
+trainIndex_i <- createDataPartition(y, p=0.8, list=FALSE)
+x_train_i <- x[trainIndex_i,]; y_train_i <- y[trainIndex_i]
+x_test_i  <- x[-trainIndex_i,]; y_test_i <- y[-trainIndex_i]
+
+fit_lasso_inter <- glmnet(x_train_i, y_train_i, alpha=1,
+                    lambda=lasso_int_cv$lambda.min)
+pred_int <- predict(fit_lasso_inter, newx=x_test_i)
+RMSE_2 <- sqrt(mean((y_test_i - pred_int)^2))
+R2_2 <- 1 - sum((y_test_i - pred_int)^2)/sum((y_test_i - mean(y_test_i))^2)
+c(RMSE=RMSE_2, R2=R2_2)
+```
+We used 10-fold cross-validation to tune the LASSO penalty parameter.
+
+
+# Compare Lasso Regression Power 
+```{r}
+data.frame(Model=c("Main effects","Interaction"), RMSE=c(RMSE_1,RMSE_2), R2=c(R2_1,R2_2))
+```
+
+## Test Hypotheses 
+## Human vs other causes (one-sided)
+Statistical test used: One-sided t-test
+```{r}
+dx <- dx %>% mutate(H_vs_Other = ifelse(Cause=="H","H","Other"))
+t_H <- t.test(ACCDMG ~ H_vs_Other, data=dx, alternative="greater", var.equal=FALSE)
+t_H
+```
+Since p-value = 0.0003206 < 0.001, we conclude that the true difference in means between Cause H and other Causes is greater than 0. This confirms our hypothesis. 
+
+## Speed Interactions with Cause 
+We use the linear regression model with interactions and the one-sided test on the coefficients of interactions. 
+
+```{r}
+m_H2 <- lm(ACCDMG_bc ~ TRNSPD * Cause + TYPE + WEATHER + VISIBLTY + TRKCLAS, dx)
+
+# Extract and test interaction terms 
+coefs <- summary(m_H2)$coefficients
+coefs[grep("TRNSPD:Cause", rownames(coefs)), ]
+```
+None of these interaction terms are significant at the p = 0.05 level. This goes against our overall hypothesis, namely in that the tran-speed cause interaction is associated with trend 
+
+```{r}
+car::linearHypothesis(m_H2, c("TRNSPD:CauseH = 0", "TRNSPD:CauseM = 0"))
+```
+The one-sided statistical test suggests that the interaction add some explanatory power, which weakly supports our hypothesis. However, this could be considered p-hacking because the two-sided test did not show significance. It is important to keep this in mind. The interaction term's slope is actually greatest for the CauseM than for CauseH. This is not what we expected. 
+
+# PART 3: CASUALTIES ANALYSIS
+
+
+# PART 4: RECOMMENDATIONS AND EVIDENCE**
+
+
+# PART 5: EXTRA CREDIT AND ACKNOWLEDGEMENTS**
+We used ChatGPT and Claude for code scaffolding and help with syntax for coding in R. Neither of us had prior experience with R, so this was extremely helpful. We did not use it to write hypotheses or come to any conclusions. 

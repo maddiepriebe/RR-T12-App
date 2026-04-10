@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/madelinepriebe/**)",
+      "Bash(pdftotext -layout '/Users/madelinepriebe/Desktop/Arel - Feb 2026/Elme Bethesda Costar.pdf' -)",
+      "Bash(brew list:*)",
+      "Bash(node -e \":*)",
+      "Bash(echo $PATH)",
+      "Bash(/usr/local/bin/node -e \":*)",
+      "Bash(head -20 grep -n \"parseCoStarPages\\\\|RentCompsData\\\\|costar-parser\" /Users/madelinepriebe/RR-T12-App/.claude/worktrees/adoring-joliot/app/api/rentcomps/download/route.ts)",
+      "Bash(head -20 grep -n \"parseCoStarPages\\\\|RentCompsData\\\\|costar-parser\" /Users/madelinepriebe/RR-T12-App/.claude/worktrees/adoring-joliot/lib/excel-builder.ts)",
+      "Bash(/usr/local/bin/node node_modules/.bin/tsc --noEmit --skipLibCheck)"
+    ]
+  }
+}
