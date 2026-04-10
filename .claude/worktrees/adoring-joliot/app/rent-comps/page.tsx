@@ -92,6 +92,9 @@ export default function RentCompsPage() {
   const [properties, setProperties] = useState<Property[]>([]);
   const [selectedPropertyId, setSelectedPropertyId] = useState("");
   const [savedToLibrary, setSavedToLibrary] = useState(false);
+  const [noCompsMessage, setNoCompsMessage] = useState<string | null>(null);
+  const [usedAI, setUsedAI] = useState(false);
+  const [pendingBody, setPendingBody] = useState<object | null>(null);
 
   useEffect(() => {
     fetch("/api/properties")
@@ -108,6 +111,9 @@ export default function RentCompsPage() {
     setStatus("idle");
     setExpanded(new Set());
     setSavedToLibrary(false);
+    setNoCompsMessage(null);
+    setUsedAI(false);
+    setPendingBody(null);
   }, []);
 
   const onDrop = useCallback(
@@ -123,6 +129,8 @@ export default function RentCompsPage() {
   const process = async () => {
     if (!file) return;
     setError(null);
+    setNoCompsMessage(null);
+    setUsedAI(false);
     setStatus("extracting");
     setStatusMsg("Reading PDF in browser…");
     setSavedToLibrary(false);
@@ -140,10 +148,11 @@ export default function RentCompsPage() {
       setStatus("processing");
       setStatusMsg(`Extracted ${pages.length} pages — processing…`);
 
+      const requestBody = { pages, pdfBase64, subjectName: subjectName.trim() };
       const res = await fetch("/api/rentcomps/process", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pages, pdfBase64, subjectName: subjectName.trim() }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!res.ok) {
@@ -151,14 +160,60 @@ export default function RentCompsPage() {
         throw new Error(err.error ?? `HTTP ${res.status}`);
       }
 
-      const result: RentCompsData = await res.json();
-      setData(result);
+      const result = await res.json();
+
+      if (result.status === "no_comps") {
+        setPendingBody(requestBody);
+        setNoCompsMessage(result.message);
+        setStatus("idle");
+        return;
+      }
+
+      setData(result.data);
+      setUsedAI(!!result.usedAI);
       setStatus("done");
     } catch (err) {
       console.error("[RentCompsPage] process() crashed:", err);
       setError(err instanceof Error ? err.message : "Processing failed");
       setStatus("error");
     }
+  };
+
+  const retryWithAI = async () => {
+    if (!pendingBody) return;
+    setNoCompsMessage(null);
+    setError(null);
+    setStatus("processing");
+    setStatusMsg("Running AI extraction…");
+
+    try {
+      const res = await fetch("/api/rentcomps/process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...pendingBody, useAI: true }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        throw new Error(err.error ?? `HTTP ${res.status}`);
+      }
+
+      const result = await res.json();
+      setData(result.data);
+      setUsedAI(true);
+      setPendingBody(null);
+      setStatus("done");
+    } catch (err) {
+      console.error("[RentCompsPage] retryWithAI() crashed:", err);
+      setError(err instanceof Error ? err.message : "AI extraction failed");
+      setStatus("error");
+    }
+  };
+
+  const cancelRetry = () => {
+    setNoCompsMessage(null);
+    setPendingBody(null);
+    setStatus("idle");
   };
 
   async function saveToLibrary() {
@@ -308,9 +363,31 @@ export default function RentCompsPage() {
           </div>
         )}
 
+        {/* No comps — offer AI retry */}
+        {noCompsMessage && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 flex items-center justify-between gap-4">
+            <p className="text-amber-800 text-sm">{noCompsMessage}</p>
+            <div className="flex items-center gap-2 shrink-0">
+              <button className="btn-primary text-sm" onClick={retryWithAI}>
+                Try AI Extraction
+              </button>
+              <button className="btn-outline text-sm" onClick={cancelRetry}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Results */}
         {status === "done" && data && (
           <>
+            {/* AI extraction banner */}
+            {usedAI && (
+              <div className="bg-amber-50 border border-amber-300 rounded-lg px-4 py-3 text-amber-800 text-sm font-medium">
+                AI extraction was used — verify results
+              </div>
+            )}
+
             {/* Toolbar */}
             <div className="flex items-center justify-between">
               <p className="text-sm text-gray-500">

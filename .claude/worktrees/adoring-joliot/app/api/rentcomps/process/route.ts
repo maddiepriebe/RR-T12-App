@@ -3,16 +3,16 @@ import { writeFileSync, readFileSync, unlinkSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { NextRequest, NextResponse } from "next/server";
-import { parseCoStarPDF as parseWithAI } from "@/lib/costar-parser";
 import { extractRentComps } from "@/lib/extractRentComps";
 import type { RentCompRow, ExtractionResult } from "@/lib/extractRentComps";
+import { extractWithAI } from "@/app/api/costar-parse/route";
 import type { CompSummary, CompDetail, UnitTypeDetail, RentCompsData } from "@/lib/schemas";
 
-// Allow up to 60s — two parallel Claude calls on a large PDF.
+// Allow up to 60s — AI fallback may fire multiple Claude calls.
 export const maxDuration = 60;
 
 // ---------------------------------------------------------------------------
-// pdftotext extraction (regex path only)
+// pdftotext extraction
 // ---------------------------------------------------------------------------
 
 function pdfToText(pdfBuffer: Buffer): string {
@@ -27,8 +27,6 @@ function pdfToText(pdfBuffer: Buffer): string {
     try { unlinkSync(out); } catch {}
   }
 }
-
-const USE_REGEX_PARSER = process.env.USE_REGEX_PARSER === "true";
 
 // ---------------------------------------------------------------------------
 // Transform ExtractionResult → RentCompsData so the client stays unchanged
@@ -159,6 +157,7 @@ export async function POST(req: NextRequest) {
       pages?: string[];
       pdfBase64?: string;
       subjectName?: string;
+      useAI?: boolean;
     };
 
     if (!Array.isArray(body.pages) || body.pages.length === 0) {
@@ -168,24 +167,35 @@ export async function POST(req: NextRequest) {
     const pages = body.pages;
     const subjectName = body.subjectName ?? "";
 
-    console.log(`[rentcomps/process] parser=${USE_REGEX_PARSER ? "regex" : "ai"} pages=${pages.length}`);
-
-    let data: RentCompsData;
-
-    if (USE_REGEX_PARSER) {
-      if (!body.pdfBase64) {
-        return NextResponse.json({ error: "pdfBase64 required for regex parser" }, { status: 400 });
-      }
-      const pdfBuffer = Buffer.from(body.pdfBase64, "base64");
-      const pdfText = pdfToText(pdfBuffer);
-      const extracted = extractRentComps(pdfText, { subjectProperty: subjectName });
-      console.log(`[rentcomps/process] regex extracted ${extracted.allRows.length} rows across ${extracted.sections.length} properties, subject="${extracted.subjectProperty}"`);
-      data = toRentCompsData(extracted);
-    } else {
-      data = await parseWithAI(pages);
+    // ── AI fallback (user opted in after regex returned no comps) ──
+    if (body.useAI) {
+      console.log(`[rentcomps/process] AI extraction requested, pages=${pages.length}`);
+      const data = await extractWithAI(pages, subjectName);
+      return NextResponse.json({ status: "ok", data, usedAI: true });
     }
 
-    return NextResponse.json(data);
+    // ── Primary path: regex extraction ────────────────────────────
+    if (!body.pdfBase64) {
+      return NextResponse.json({ error: "pdfBase64 required" }, { status: 400 });
+    }
+
+    console.log(`[rentcomps/process] regex parser, pages=${pages.length}`);
+    const pdfBuffer = Buffer.from(body.pdfBase64, "base64");
+    const pdfText = pdfToText(pdfBuffer);
+    const extracted = extractRentComps(pdfText, { subjectProperty: subjectName });
+    console.log(`[rentcomps/process] regex extracted ${extracted.allRows.length} rows across ${extracted.sections.length} properties, subject="${extracted.subjectProperty}"`);
+
+    const data = toRentCompsData(extracted);
+
+    if (data.comps.length === 0) {
+      return NextResponse.json({
+        status: "no_comps",
+        data: null,
+        message: "Regex parser found no comps. Retry with AI extraction?",
+      });
+    }
+
+    return NextResponse.json({ status: "ok", data, usedAI: false });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Processing failed";
     console.error("[rentcomps/process] error:", err);
