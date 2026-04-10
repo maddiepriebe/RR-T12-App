@@ -355,6 +355,37 @@ function assembleRentCompsData(
   };
 }
 
+// ─── Callable wrapper (used by /api/rentcomps/process) ────────────
+
+/**
+ * AI-based CoStar extraction from raw page text.
+ * Chunks pages internally, fires Claude calls, and returns RentCompsData.
+ */
+export async function extractWithAI(
+  pages: string[],
+  subjectName: string
+): Promise<RentCompsData> {
+  const summaryChunk = pages.slice(0, 10).join("\n\n");
+  const detailPages = pages.filter((p) => p.includes("UNIT BREAKDOWN"));
+  const detailChunks: string[] = [];
+  for (let i = 0; i < detailPages.length; i += 3) {
+    detailChunks.push(detailPages.slice(i, i + 3).join("\n\n"));
+  }
+
+  const summaryComps = await extractSummaryComps(summaryChunk, 0);
+  console.log(`[costar-parse] AI summary: extracted ${summaryComps.length} comps`);
+
+  const allDetails: ClaudePropertyDetail[] = [];
+  for (let i = 0; i < detailChunks.length; i++) {
+    console.log(`[costar-parse] AI detail chunk ${i + 1}/${detailChunks.length}...`);
+    const details = await extractPropertyDetails(detailChunks[i]);
+    allDetails.push(...details);
+  }
+  console.log(`[costar-parse] AI details: extracted ${allDetails.length} sections`);
+
+  return assembleRentCompsData(summaryComps, allDetails, subjectName);
+}
+
 // ─── Route handler ─────────────────────────────────────────────────
 
 export async function POST(req: Request) {
