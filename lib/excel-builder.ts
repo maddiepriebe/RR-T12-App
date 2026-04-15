@@ -544,6 +544,6 @@ function buildRCSheet2(data: RentCompsData): XLSX.WorkSheet {
 }
 
 export function workbookToBuffer(wb: XLSX.WorkBook): Buffer {
-  const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
-  return Buffer.from(buf);
+  const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
+  return Buffer.from(buf as ArrayLike<number>);
 }

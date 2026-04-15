@@ -4,8 +4,18 @@ declare module "xlsx" {
     Sheets: { [name: string]: WorkSheet };
   }
 
+  interface CellObject {
+    t?: string;   // cell type: b, n, s, d, e, z
+    v?: unknown;  // raw value
+    w?: string;   // formatted text
+    z?: string;   // number format
+    f?: string;   // formula
+    r?: string;   // rich text
+    s?: unknown;  // style
+  }
+
   interface WorkSheet {
-    [cell: string]: unknown;
+    [cell: string]: any;
   }
 
   interface ParsingOptions {
@@ -49,6 +59,7 @@ declare module "xlsx" {
     decode_range(range: string): { s: { c: number; r: number }; e: { c: number; r: number } };
     encode_cell(cell: { c: number; r: number }): string;
     encode_range(range: { s: { c: number; r: number }; e: { c: number; r: number } }): string;
+    sheet_to_csv(worksheet: WorkSheet, opts?: Record<string, unknown>): string;
     sheet_add_aoa(ws: WorkSheet, data: unknown[][], opts?: { origin?: string | number }): WorkSheet;
   };
 }
