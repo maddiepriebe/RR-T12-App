@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import NavBar from "@/components/shared/NavBar";
 import CoStarUpload from "@/components/rentcomps/CoStarUpload";
@@ -10,7 +10,6 @@ import SubjectVsComps from "@/components/rentcomps/SubjectVsComps";
 import ProgressIndicator from "@/components/shared/ProgressIndicator";
 import type { RentCompsData } from "@/lib/schemas";
 import { extractPDFPages } from "@/lib/extract-pdf-client";
-import { parseCoStarPages } from "@/lib/costar-parser";
 
 type Status = "idle" | "processing" | "done" | "error";
 type StepStatus = "pending" | "active" | "done" | "error";
@@ -36,6 +35,9 @@ function RentCompsPage() {
   const [properties, setProperties] = useState<Property[]>([]);
   const [selectedPropertyId, setSelectedPropertyId] = useState<string>("");
   const [savedToLibrary, setSavedToLibrary] = useState(false);
+  const [awaitingAIRetry, setAwaitingAIRetry] = useState(false);
+  const [retryInFlight, setRetryInFlight] = useState(false);
+  const pendingRetryRef = useRef<{ pages: string[]; subjectName: string } | null>(null);
 
   useEffect(() => {
     fetch("/api/properties").then((r) => r.json()).then((rows) => {
@@ -53,17 +55,36 @@ function RentCompsPage() {
     setSteps((prev) => prev.map((step, i) => (i === idx ? { ...step, status: s } : step)));
   }
 
+  function autoSaveIfSelected(compsData: RentCompsData) {
+    if (!selectedPropertyId) return;
+    const label = file?.name || "Rent Comps";
+    fetch(`/api/properties/${selectedPropertyId}/reports`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "rentcomps",
+        label,
+        metadata: {
+          compCount: compsData.comps.filter((c) => !c.isSubject).length,
+          subject: compsData.subjectProperty?.propertyName ?? null,
+        },
+        processedData: { data: compsData },
+      }),
+    }).then(() => setSavedToLibrary(true)).catch(() => {});
+  }
+
   async function processReport() {
     if (!file) return;
 
     setStatus("processing");
     setError(null);
     setData(null);
+    setAwaitingAIRetry(false);
+    pendingRetryRef.current = null;
     setSteps(INITIAL_STEPS.map((s, i) => ({ ...s, status: i === 0 ? "active" : "pending" })));
 
     try {
       // Step 1: Extract text client-side — PDF binary never leaves the browser.
-      // Text from a 17-20 MB CoStar PDF is ~100-400 KB, well within Vercel limits.
       updateStep(0, "active");
       const t0 = performance.now();
       const pages = await extractPDFPages(file);
@@ -74,49 +95,47 @@ function RentCompsPage() {
       );
       updateStep(0, "done");
 
-      // Step 2: Parse entirely in the browser — no server call, no timeout risk.
+      // Step 2: Send page text to the server's regex parser.
       updateStep(1, "active");
-      console.log("3. Starting client-side parse");
       const t1 = performance.now();
+      const res = await fetch("/api/rentcomps/process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pages, subjectName }),
+      });
 
-      const compsData = await parseCoStarPages(pages, subjectName);
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error || `Parser request failed (${res.status})`);
+      }
+
+      const payload = (await res.json()) as
+        | { status: "ok"; data: RentCompsData }
+        | { status: "no_comps"; data: null };
 
       console.log(
-        `2. Parsing complete — ${compsData.comps.filter((c) => !c.isSubject).length} comps found, ` +
+        `2. Server parse complete — status=${payload.status}, ` +
         `took ${((performance.now() - t1) / 1000).toFixed(1)}s`
       );
+
+      if (payload.status === "no_comps") {
+        // Regex parser couldn't find any comps. Stash pages for an AI retry and
+        // prompt the user — Claude extraction takes 30–60s so we don't auto-run it.
+        pendingRetryRef.current = { pages, subjectName };
+        setAwaitingAIRetry(true);
+        setStatus("idle");
+        setSteps(INITIAL_STEPS);
+        return;
+      }
+
       updateStep(1, "done");
       updateStep(2, "active");
-
-      if (!compsData.comps.length && !compsData.subjectProperty) {
-        throw new Error(
-          "Could not parse any comp data from this PDF. Please verify it is a CoStar Underwriting Report."
-        );
-      }
-
       setSteps(INITIAL_STEPS.map((s) => ({ ...s, status: "done" as StepStatus })));
-      console.log("4. Rendering results");
-      setData(compsData);
+
+      setData(payload.data);
       setStatus("done");
       setActiveTab("summary");
-
-      // Auto-save to property library if a property is pre-selected
-      if (selectedPropertyId) {
-        const label = file?.name || "Rent Comps";
-        fetch(`/api/properties/${selectedPropertyId}/reports`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            type: "rentcomps",
-            label,
-            metadata: {
-              compCount: compsData.comps.filter((c) => !c.isSubject).length,
-              subject: compsData.subjectProperty?.propertyName ?? null,
-            },
-            processedData: { data: compsData },
-          }),
-        }).then(() => setSavedToLibrary(true)).catch(() => {});
-      }
+      autoSaveIfSelected(payload.data);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Processing failed";
       setError(msg);
@@ -125,6 +144,64 @@ function RentCompsPage() {
         prev.map((s) => (s.status === "active" ? { ...s, status: "error" } : s))
       );
     }
+  }
+
+  async function retryWithAI() {
+    const pending = pendingRetryRef.current;
+    if (!pending) return;
+    const { pages, subjectName: subj } = pending;
+
+    setRetryInFlight(true);
+    setError(null);
+
+    try {
+      // Boundary between the summary table and per-comp detail pages is the
+      // standalone "Photo Comparison" page, which appears exactly once.
+      const photoIdx = pages.findIndex((p) => p.includes("Photo Comparison"));
+      const boundary = photoIdx === -1 ? Math.ceil(pages.length / 3) : photoIdx;
+      const summaryChunk = pages.slice(0, boundary).join("\n");
+      const detailPages = pages.slice(boundary);
+      const detailChunks: string[] = [];
+      for (let i = 0; i < detailPages.length; i += 3) {
+        detailChunks.push(detailPages.slice(i, i + 3).join("\n"));
+      }
+
+      const fullText = pages.join("\n");
+      const countM = fullText.match(/(\d{1,3})\$[^\n]*\nNo\.\s*Rent\s*Comps/);
+      const expectedCount = countM ? parseInt(countM[1], 10) : 0;
+
+      const res = await fetch("/api/costar-parse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ summaryChunk, detailChunks, subjectName: subj, expectedCount }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error || `AI extraction failed (${res.status})`);
+      }
+
+      const data = (await res.json()) as RentCompsData;
+      if (!data.comps.length && !data.subjectProperty) {
+        throw new Error("AI extraction returned no comps. Please verify this is a CoStar Underwriting Report.");
+      }
+
+      setData(data);
+      setStatus("done");
+      setActiveTab("summary");
+      setAwaitingAIRetry(false);
+      pendingRetryRef.current = null;
+      autoSaveIfSelected(data);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "AI retry failed";
+      setError(msg);
+    } finally {
+      setRetryInFlight(false);
+    }
+  }
+
+  function cancelAIRetry() {
+    setAwaitingAIRetry(false);
+    pendingRetryRef.current = null;
   }
 
   async function downloadExcel() {
@@ -161,6 +238,9 @@ function RentCompsPage() {
     setData(null);
     setSteps(INITIAL_STEPS);
     setSavedToLibrary(false);
+    setAwaitingAIRetry(false);
+    setRetryInFlight(false);
+    pendingRetryRef.current = null;
   }
 
   const tabs: Array<{ id: Tab; label: string }> = [
@@ -293,6 +373,33 @@ function RentCompsPage() {
             <p className="text-xs text-gray-400 mt-3">
               Parsing comp data from PDF — usually completes in under 10 seconds.
             </p>
+          </div>
+        )}
+
+        {/* AI retry prompt */}
+        {awaitingAIRetry && (
+          <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+            <p className="text-sm font-semibold text-amber-800">No comps detected with the fast parser</p>
+            <p className="text-sm text-amber-700 mt-1">
+              The regex parser couldn&apos;t find any comp data. Retry using AI extraction?
+              This takes 30–60 seconds and uses Claude to read the report.
+            </p>
+            <div className="flex gap-2 mt-3">
+              <button
+                onClick={retryWithAI}
+                disabled={retryInFlight}
+                className="btn-primary text-sm px-4 py-2"
+              >
+                {retryInFlight ? "Running AI extraction…" : "Retry with AI"}
+              </button>
+              <button
+                onClick={cancelAIRetry}
+                disabled={retryInFlight}
+                className="text-sm px-4 py-2 text-gray-600 hover:text-gray-800"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         )}
 

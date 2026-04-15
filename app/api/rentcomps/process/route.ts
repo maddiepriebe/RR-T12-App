@@ -1,34 +1,17 @@
 /**
  * POST /api/rentcomps/process
  *
- * Parses CoStar PDF page text into structured RentCompsData.
- * Set USE_REGEX_PARSER=true in .env.local to use the regex parser;
- * omit or set to false to use the AI parser.
+ * Parses CoStar PDF page text into structured RentCompsData using the regex parser.
+ * If the regex parser finds no comps, responds with { status: "no_comps", data: null }
+ * so the client can prompt the user to retry via the AI path (/api/costar-parse).
  *
  * Body:    { pages: string[], subjectName: string }
- * Response: RentCompsData
- *
- * NOTE: lib/costar-parser.ts exports `parseCoStarPages`, not `parseCoStarPDF`.
- * To use the exact import alias below, add this one line to lib/costar-parser.ts:
- *   export { parseCoStarPages as parseCoStarPDF }
- * Until then the alias is applied here.
+ * Response: { status: "ok", data: RentCompsData } | { status: "no_comps", data: null }
  */
 
 import { auth } from "@clerk/nextjs/server";
 import { parseCoStarPages } from "@/lib/costar-parser";
-import { parseCoStarPDF as parseWithRegex } from "@/lib/costar-parser-regex";
 import { rateLimit } from "@/lib/rate-limit";
-import type { RentCompsData } from "@/lib/schemas";
-
-const USE_REGEX_PARSER = process.env.USE_REGEX_PARSER === "true";
-
-// Alias so both parsers share the same call signature.
-// Replace with: import { parseCoStarPDF as parseWithAI } from "@/lib/costar-parser";
-// once that file exports parseCoStarPDF.
-const parseWithAI = (pages: string[], subjectName: string): RentCompsData =>
-  parseCoStarPages(pages, subjectName);
-
-const parseCoStarPDF = USE_REGEX_PARSER ? parseWithRegex : parseWithAI;
 
 export async function POST(req: Request) {
   try {
@@ -51,13 +34,16 @@ export async function POST(req: Request) {
       return Response.json({ error: "pages must be a non-empty array of strings" }, { status: 400 });
     }
 
-    console.log(
-      `[rentcomps/process] parser=${USE_REGEX_PARSER ? "regex" : "ai"} ` +
-        `pages=${pages.length} subject="${subjectName}"`
-    );
+    console.log(`[rentcomps/process] pages=${pages.length} subject="${subjectName}"`);
 
-    const result = parseCoStarPDF(pages, subjectName);
-    return Response.json(result);
+    const result = parseCoStarPages(pages, subjectName);
+
+    if (result.comps.length === 0) {
+      console.log("[rentcomps/process] regex parser found no comps — signalling no_comps");
+      return Response.json({ status: "no_comps", data: null });
+    }
+
+    return Response.json({ status: "ok", data: result });
   } catch (err) {
     console.error("[rentcomps/process] error:", err);
     return Response.json({ error: "Unexpected error" }, { status: 500 });

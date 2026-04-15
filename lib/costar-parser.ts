@@ -140,7 +140,18 @@ function parseCompDataLine(line: string): {
   const firstDollar = line.indexOf("$");
   if (firstDollar === -1) return null;
 
-  const prefix = line.slice(0, firstDollar).trim();
+  // A leading bedroom rent of "-" (no studios / no 1BR etc.) gets stuck on the
+  // end of the prefix because it sits between avgSF and the first $amount with
+  // no whitespace (e.g. "237980-$2,349..." → studio=null, units=237, avgSF=980).
+  // Strip trailing dashes, remember how many, and prepend that many nulls to
+  // rentTokens so the remaining $amounts land in the correct bedroom slots.
+  let rawPrefix = line.slice(0, firstDollar).trim();
+  let leadingNulls = 0;
+  while (rawPrefix.endsWith("-")) {
+    leadingNulls++;
+    rawPrefix = rawPrefix.slice(0, -1).trim();
+  }
+  const prefix = rawPrefix;
 
   // Collect tokens: $X,XXX  $X.XX  or bare dash (missing bedroom)
   // Match $amounts and also standalone - between amounts
@@ -180,6 +191,9 @@ function parseCompDataLine(line: string): {
       rentTokens.push(tokens[i].value);
     }
   }
+
+  // Prepend placeholders for leading-dash bedrooms stripped from the prefix.
+  for (let i = 0; i < leadingNulls; i++) rentTokens.unshift(null);
 
   // Parse prefix for units + avgSF
   let units: number | null = null;
@@ -473,8 +487,27 @@ function parsePropertySections(fullText: string): PropertySection[] {
     const part = parts[i];
     const lines = part.split("\n");
 
-    // Line 0: rank number
-    if (!/^\d{1,2}$/.test((lines[0] ?? "").trim())) continue;
+    // Line 0: rank number. Parts that don't open with a rank are either noise
+    // (e.g. the Photo Comparison page) or continuation pages — the same comp's
+    // UNIT BREAKDOWN spilled onto a second physical page, which reproduces the
+    // anchor but starts with the unit-mix column headers ("UnitsBedBath…")
+    // instead of a rank. Merge continuation unit-mix data into the previous
+    // section so Totals / All Studios / All 1 Beds etc. aren't lost.
+    if (!/^\d{1,2}$/.test((lines[0] ?? "").trim())) {
+      if (sections.length === 0) continue;
+      const hasContinuationRows =
+        /\$[\d,]+\s+\$\d+\.\d{2}/.test(part) ||
+        /\$[\d,]+\$\d+\.\d{2}/.test(part) ||
+        /All\s+(?:Studios?|1\s*Beds?|2\s*Beds?|3\s*Beds?)/i.test(part) ||
+        /^Totals?\b/im.test(part);
+      if (!hasContinuationRows) continue;
+      const prev = sections[sections.length - 1];
+      const cont = parseUnitMixLines(part.split("\n"));
+      prev.unitTypes.push(...cont.unitTypes);
+      prev.summaryRows.push(...cont.summaryRows);
+      if (cont.totalsRow && !prev.totalsRow) prev.totalsRow = cont.totalsRow;
+      continue;
+    }
 
     // Line 1: "{address} - {comp name}"
     const addrNameLine = (lines[1] ?? "").trim();
@@ -504,8 +537,12 @@ function parsePropertySections(fullText: string): PropertySection[] {
       console.log("[DEBUG comp1] bodyText[:200]:", JSON.stringify(bodyText.slice(0, 200)));
     }
 
-    const yrM = headerText.match(/Year Built:\s*([A-Za-z]+ \d{4}|\d{4})/i);
-    const yearBuilt = yrM ? yr(yrM[1]) : null;
+    // CoStar detail sections always contain a line of the form "Year Built: Oct 2024"
+    // (colon may or may not have a trailing space in PDF.js output). Match the full
+    // line, then take the 4-digit year group. Search the whole part — the line can
+    // land on either side of "UNIT BREAKDOWN" depending on PDF.js line grouping.
+    const yrM = part.match(/Year Built:\s*[A-Za-z]{3,9}\s+(\d{4})/);
+    const yearBuilt = yrM ? parseInt(yrM[1], 10) : null;
 
     const sfM = headerText.match(/Avg\.\s*Unit Size:\s*([\d,]+)\s*SF/i);
     const avgUnitSF = sfM ? num(sfM[1]) : null;
