@@ -109,7 +109,7 @@ export async function parseRealPage(buffer: Buffer): Promise<ParsedRentRoll> {
   // Find column header row (contains "Bldg/Unit") — typically row 5 but search to be safe
   let dataStartRow = 6;
   for (let i = 0; i < Math.min(10, rows.length); i++) {
-    if (rows[i]?.some((v) => String(v ?? "").trim() === "Bldg/Unit")) {
+    if (rows[i]?.some((v: string | number | null) => String(v ?? "").trim() === "Bldg/Unit")) {
       dataStartRow = i + 1;
       break;
     }
