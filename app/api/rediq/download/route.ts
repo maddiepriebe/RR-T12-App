@@ -1,12 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
 import { buildT12Workbook, workbookToBuffer } from "@/lib/excel-builder";
 import { buildRedIQWorkbook } from "@/lib/rediq-builder";
+import { rateLimit } from "@/lib/rate-limit";
 import * as XLSX from "xlsx";
 import type { T12Data, RentRollData } from "@/lib/schemas";
 import type { ParsedRentRoll } from "@/lib/yardi-parser";
 
 export async function POST(req: NextRequest) {
   try {
+    const { userId } = await auth();
+    if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    const rl = rateLimit(`rediq-download:${userId}`, 20, 60_000);
+    if (!rl.ok) {
+      return NextResponse.json(
+        { error: "Too many requests" },
+        { status: 429, headers: { "Retry-After": String(rl.retryAfterSeconds) } }
+      );
+    }
+
     const body = await req.json();
     const { t12, rentRoll, rentRollFormat } = body as {
       t12?: T12Data;
@@ -55,9 +68,6 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     console.error("Download error:", err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Download failed" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Download failed" }, { status: 500 });
   }
 }

@@ -8,7 +8,9 @@
  * Response: RentCompsData
  */
 
+import { auth } from "@clerk/nextjs/server";
 import { callClaude, parseClaudeJSON } from "@/lib/anthropic";
+import { rateLimit } from "@/lib/rate-limit";
 import type {
   RentCompsData,
   CompSummary,
@@ -358,28 +360,44 @@ function assembleRentCompsData(
 // ─── Route handler ─────────────────────────────────────────────────
 
 export async function POST(req: Request) {
-  const { summaryChunk, detailChunks, subjectName, expectedCount } =
-    await req.json();
+  try {
+    const { userId } = await auth();
+    if (!userId) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
-  // 1. Extract summary comps — one Claude call for the ranked table
-  const summaryComps = await extractSummaryComps(summaryChunk, expectedCount);
-  console.log(
-    `[costar-parse] Summary: extracted ${summaryComps.length} comps` +
-      (expectedCount ? ` (expected ${expectedCount})` : "")
-  );
+    const rl = rateLimit(`costar-parse:${userId}`, 10, 60_000);
+    if (!rl.ok) {
+      return Response.json(
+        { error: "Too many requests" },
+        { status: 429, headers: { "Retry-After": String(rl.retryAfterSeconds) } }
+      );
+    }
 
-  // 2. Extract property details — one Claude call per batch of ~3 pages
-  const allDetails: ClaudePropertyDetail[] = [];
-  for (let i = 0; i < detailChunks.length; i++) {
+    const { summaryChunk, detailChunks, subjectName, expectedCount } =
+      await req.json();
+
+    // 1. Extract summary comps — one Claude call for the ranked table
+    const summaryComps = await extractSummaryComps(summaryChunk, expectedCount);
     console.log(
-      `[costar-parse] Detail chunk ${i + 1}/${detailChunks.length}...`
+      `[costar-parse] Summary: extracted ${summaryComps.length} comps` +
+        (expectedCount ? ` (expected ${expectedCount})` : "")
     );
-    const details = await extractPropertyDetails(detailChunks[i]);
-    allDetails.push(...details);
-  }
-  console.log(`[costar-parse] Details: extracted ${allDetails.length} sections`);
 
-  // 3. Assemble into RentCompsData and return
-  const result = assembleRentCompsData(summaryComps, allDetails, subjectName);
-  return Response.json(result);
+    // 2. Extract property details — one Claude call per batch of ~3 pages
+    const allDetails: ClaudePropertyDetail[] = [];
+    for (let i = 0; i < detailChunks.length; i++) {
+      console.log(
+        `[costar-parse] Detail chunk ${i + 1}/${detailChunks.length}...`
+      );
+      const details = await extractPropertyDetails(detailChunks[i]);
+      allDetails.push(...details);
+    }
+    console.log(`[costar-parse] Details: extracted ${allDetails.length} sections`);
+
+    // 3. Assemble into RentCompsData and return
+    const result = assembleRentCompsData(summaryComps, allDetails, subjectName);
+    return Response.json(result);
+  } catch (err) {
+    console.error("[costar-parse] error:", err);
+    return Response.json({ error: "Parse failed" }, { status: 500 });
+  }
 }

@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
 import { callClaude, parseClaudeJSON } from "@/lib/anthropic";
 import { parsePDF } from "@/lib/pdf-parser";
 import { isYardiFormat, parseYardiRentRoll } from "@/lib/yardi-parser";
+import { validateUpload } from "@/lib/upload-guard";
+import { rateLimit } from "@/lib/rate-limit";
 import type { RentRollData } from "@/lib/schemas";
 
 // ─── Claude fallback for non-Yardi formats ─────────────────────────
@@ -58,12 +61,26 @@ async function extractTextFromExcel(buffer: Buffer): Promise<string> {
 
 export async function POST(req: NextRequest) {
   try {
+    const { userId } = await auth();
+    if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    const rl = rateLimit(`rentroll:${userId}`, 10, 60_000);
+    if (!rl.ok) {
+      return NextResponse.json(
+        { error: "Too many requests" },
+        { status: 429, headers: { "Retry-After": String(rl.retryAfterSeconds) } }
+      );
+    }
+
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
 
     if (!file) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 });
     }
+
+    const v = validateUpload(file);
+    if (!v.ok) return NextResponse.json({ error: v.error }, { status: v.status ?? 400 });
 
     const buffer = Buffer.from(await file.arrayBuffer());
     const ext = file.name.split(".").pop()?.toLowerCase();
@@ -100,9 +117,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, data: rrData, format: "generic" });
   } catch (err) {
     console.error("Rent roll processing error:", err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Processing failed" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Processing failed" }, { status: 500 });
   }
 }

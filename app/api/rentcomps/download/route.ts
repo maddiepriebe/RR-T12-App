@@ -1,9 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
 import { buildRentCompsWorkbook, workbookToBuffer } from "@/lib/excel-builder";
+import { rateLimit } from "@/lib/rate-limit";
 import type { RentCompsData } from "@/lib/schemas";
 
 export async function POST(req: NextRequest) {
   try {
+    const { userId } = await auth();
+    if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    const rl = rateLimit(`rentcomps-download:${userId}`, 20, 60_000);
+    if (!rl.ok) {
+      return NextResponse.json(
+        { error: "Too many requests" },
+        { status: 429, headers: { "Retry-After": String(rl.retryAfterSeconds) } }
+      );
+    }
+
     const data = (await req.json()) as RentCompsData;
 
     if (!data || (!data.comps?.length && !data.subjectProperty)) {
@@ -28,9 +41,6 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     console.error("Rent comps download error:", err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Download failed" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Download failed" }, { status: 500 });
   }
 }

@@ -18,9 +18,9 @@
     "@types/node": "^22.0.0",
     "@types/react": "^18.3.1",
     "@types/react-dom": "^18.3.1",
-    "@vercel/blob": "^0.27.3",
+    "@vercel/blob": "^2.3.3",
     "autoprefixer": "^10.4.21",
-    "drizzle-orm": "^0.38.4",
+    "drizzle-orm": "^0.45.2",
     "next": "^14.2.35",
     "pdf-parse": "^1.1.1",
     "postcss": "^8.5.3",
@@ -34,6 +34,6 @@
   },
   "devDependencies": {
     "@types/pdf-parse": "^1.1.5",
-    "drizzle-kit": "^0.30.6"
+    "drizzle-kit": "^0.31.10"
   }
 }

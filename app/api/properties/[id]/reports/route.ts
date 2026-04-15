@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { getDb, reports, properties } from "@/lib/db";
-import { eq, desc } from "drizzle-orm";
+import { and, eq, desc } from "drizzle-orm";
 
 export async function GET(
   _req: NextRequest,
@@ -17,7 +17,7 @@ export async function GET(
     const [prop] = await db
       .select({ id: properties.id })
       .from(properties)
-      .where(eq(properties.id, params.id));
+      .where(and(eq(properties.id, params.id), eq(properties.clerkUserId, userId)));
 
     if (!prop) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
@@ -55,6 +55,15 @@ export async function POST(
     const { type, label, excelUrl, metadata, processedData } = body;
 
     const db = getDb();
+
+    // Verify property ownership before inserting a report against it
+    const [prop] = await db
+      .select({ id: properties.id })
+      .from(properties)
+      .where(and(eq(properties.id, params.id), eq(properties.clerkUserId, userId)));
+
+    if (!prop) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
     const [report] = await db
       .insert(reports)
       .values({ propertyId: params.id, type, label, excelUrl, metadata, processedData })

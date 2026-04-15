@@ -14,8 +14,10 @@
  * Until then the alias is applied here.
  */
 
+import { auth } from "@clerk/nextjs/server";
 import { parseCoStarPages } from "@/lib/costar-parser";
 import { parseCoStarPDF as parseWithRegex } from "@/lib/costar-parser-regex";
+import { rateLimit } from "@/lib/rate-limit";
 import type { RentCompsData } from "@/lib/schemas";
 
 const USE_REGEX_PARSER = process.env.USE_REGEX_PARSER === "true";
@@ -30,6 +32,17 @@ const parseCoStarPDF = USE_REGEX_PARSER ? parseWithRegex : parseWithAI;
 
 export async function POST(req: Request) {
   try {
+    const { userId } = await auth();
+    if (!userId) return Response.json({ error: "Unauthorized" }, { status: 401 });
+
+    const rl = rateLimit(`rentcomps-process:${userId}`, 10, 60_000);
+    if (!rl.ok) {
+      return Response.json(
+        { error: "Too many requests" },
+        { status: 429, headers: { "Retry-After": String(rl.retryAfterSeconds) } }
+      );
+    }
+
     const body = await req.json();
     const pages: string[] = body.pages ?? [];
     const subjectName: string = body.subjectName ?? "";
@@ -47,9 +60,6 @@ export async function POST(req: Request) {
     return Response.json(result);
   } catch (err) {
     console.error("[rentcomps/process] error:", err);
-    return Response.json(
-      { error: err instanceof Error ? err.message : "Unexpected error" },
-      { status: 500 }
-    );
+    return Response.json({ error: "Unexpected error" }, { status: 500 });
   }
 }
