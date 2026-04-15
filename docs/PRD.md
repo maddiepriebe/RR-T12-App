@@ -11,6 +11,7 @@ RR-T12-App (`arel-underwriting`) is an internal multifamily real estate underwri
 ## Goals
 
 1. Ingest raw deal documents (T12 Excel, rent roll Excel, CoStar PDFs) and extract structured data automatically
+Acceptance Criteria: Achieve >= 90% field-level extraction accuracy on T12 and Rent Roll deterministic parsers; fallback on AI usage limited to <10% of files monhly. 
 2. Standardize all parsed data into a consistent internal schema
 3. Allow analysts to review, edit, and save parsed results per property
 4. Generate downloadable Excel outputs in Arel Capital format
@@ -22,7 +23,6 @@ RR-T12-App (`arel-underwriting`) is an internal multifamily real estate underwri
 - Mobile-native app
 - Full proforma / DCF modeling (future phase)
 - Deal pipeline kanban (future phase)
-- Internal comp generation from historical deals (future phase)
 
 ---
 
@@ -56,10 +56,58 @@ The property detail page (`/properties/[id]`) shows all saved reports for that p
 - Regex parser (`lib/t12-parser.ts`) attempts deterministic extraction first — no AI cost, no latency
 - If regex returns fewer than 3 line items, Claude is called as a fallback with a structured system prompt
 - Parsed output is standardized `T12Data` JSON (line items categorized as income/expense/noi)
-- UI renders the T12 in a financial table with per-unit and % EGI columns
+- Each extracted line item is mapped to a canonical category from a predefined taxonomy
+  (`lib/t12-categories.ts`); matching runs in three tiers — (1) database lookup of previously
+  confirmed mappings, (2) fuzzy string match, (3) Claude fallback for ambiguous items.
+  Resolved mappings are written back to the `t12_category_mappings` table with their source
+  (`exact`, `fuzzy`, `llm`, `user`) and confirmation status, so the system improves with each
+  processed file. Unmatched line items are flagged as `UNMAPPED` and highlighted in the UI.
+- User can review and correct `UNMAPPED` or unconfirmed mappings via a dropdown in the UI;
+  confirmed mappings are saved with `source = 'user'` and used as the highest-priority match
+  in future processing.
 - If Claude fallback was used, an amber banner displays: "AI extraction was used — verify line items"
-- User can save the result to a property → stored in `reports` table with `processedData`
+- User can save the result to a property → stored in `reports` table with `processedData`;
+  resolved category mappings stored in `t12_category_mappings` table
+
+  **T12 Reconciliation View**
+
+After initial parsing and auto-mapping, the user is presented with a reconciliation UI before saving:
+
+- Table displays one row per line item with columns: Mapped Category | Original Label | Jan | Feb | ... | Dec | Total
+- User designates the first expense row and the NOI row via row-level controls; this anchors
+  the revenue/expense boundary and the target NOI
+- All revenue line items are summed, all expense line items are summed, and the implied NOI
+  (Revenue − Expenses) is computed per month and in total
+- A reconciliation row at the bottom shows the discrepancy between implied NOI and the designated
+  NOI row, as a dollar amount per month column and total column
+- Discrepancy updates in real time as the user maps `UNMAPPED` items or reclassifies existing ones
+- Non-zero discrepancy is highlighted in red; user cannot save until discrepancy is $0 or
+  explicitly overrides with a confirmation prompt
+- User can save the reconciliation at any point; saved state includes the designated expense/NOI
+  boundary, all category mappings, and the reconciled data — stored in `reports` table with
+  `processedData` and `mappingState`
+- User can return to the reconciliation view at any time to adjust mappings or reclassify line
+  items; changes trigger a re-reconciliation and must resolve to $0 discrepancy (or explicit
+  override) before re-saving
+
+**Final T12 View**
+
+Once reconciliation is saved, the T12 renders as a formatted financial table:
+
+- Rows are grouped by mapped category (e.g., *Payroll*, *Utilities*, *Repair & Maintenance*),
+  showing the aggregated total across all original line items within that category
+- Each mapped category row is expandable via a disclosure triangle or chevron, revealing the
+  original line items mapped to it in indented sub-rows:
+    Repair & Maintenance        $X    $X    $X    ...
+        Maintenance & Repairs Payroll   $X    $X    $X
+        Maintenance & Repairs Supply    $X    $X    $X
+        Maintenance & Repairs Contract  $X    $X    $X
+- Expanded sub-rows are UI-only and do not appear in the downloaded Excel file; the download
+  contains only the mapped category aggregates
+- Per-unit and % EGI columns are computed at the mapped category level, not the original line
+  item level
 - User can download as Excel
+
 
 **Schema output:** `T12Data` (see `lib/schemas.ts`)
 

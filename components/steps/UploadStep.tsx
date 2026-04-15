@@ -36,7 +36,7 @@ export default function UploadStep({ onFile, loading, error }: UploadStepProps) 
       <div>
         <p className="text-sm font-semibold text-navy-800">Upload Rent Roll</p>
         <p className="text-xs text-gray-500 mt-0.5">
-          Yardi exports are parsed directly. All other XLSX and CSV formats are mapped with AI.
+          Files parsed directly before fallback on AI mapping.
         </p>
       </div>
 
