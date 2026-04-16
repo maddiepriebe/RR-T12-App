@@ -54,7 +54,10 @@ function PropertyCard({ detail }: { detail: CompDetail }) {
             <span className="text-xs text-blue-200 ml-2">{detail.address}</span>
           )}
           {detail.yearBuilt && (
-            <span className="text-xs text-blue-300 ml-2">Built {detail.yearBuilt}</span>
+            <span className="text-xs text-blue-300 ml-2">
+              Built {detail.yearBuilt}
+              {detail.renovYear ? ` (Renov. ${detail.renovYear})` : ""}
+            </span>
           )}
         </div>
         <svg

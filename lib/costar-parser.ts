@@ -241,6 +241,7 @@ interface PropertySection {
   city: string | null;
   state: string | null;
   yearBuilt: number | null;
+  renovYear: number | null;
   totalUnits: number | null;
   stories: number | null;
   avgUnitSF: number | null;
@@ -443,7 +444,7 @@ function detectDetailAnchor(fullText: string): string | null {
   }
   console.log("[anchor] best:", JSON.stringify(best));
   // Require at least 2 occurrences — a single hit could be a false positive
-  return bestCount >= 2 ? best : null;
+  return bestCount >= 1 ? best : null;
 }
 
 // ─── 2b. UNIT BREAKDOWN fallback (used for subject section + fallback) ──
@@ -479,28 +480,67 @@ function parsePropertySections(fullText: string): PropertySection[] {
   console.log("[anchor] split produced", parts.length, "parts");
   const sections: PropertySection[] = [];
 
-  // parts[0] — content before the first comp detail page (includes subject section)
-  sections.push(...parsePropertySectionsFallback(parts[0]));
+  // parts[0] — content before the first comp detail page (includes subject section).
+  // The subject's UNIT BREAKDOWN often spans two physical pages, which makes
+  // parsePropertySectionsFallback return 2 sections for a single property.
+  // Collapse them into one so the subject has all its unit rows and doesn't
+  // leave a ghost section that shifts downstream comp→detail matching.
+  const parts0Sections = parsePropertySectionsFallback(parts[0]);
+  if (parts0Sections.length > 0) {
+    const primary = parts0Sections[0];
+    for (let k = 1; k < parts0Sections.length; k++) {
+      const extra = parts0Sections[k];
+      primary.unitTypes.push(...extra.unitTypes);
+      primary.summaryRows.push(...extra.summaryRows);
+      if (extra.totalsRow && !primary.totalsRow) primary.totalsRow = extra.totalsRow;
+    }
+    sections.push(primary);
+  }
+  // Sections seeded from parts[0] are the subject. Never merge continuation
+  // unit-mix rows into them — otherwise unmatched comp pages dump their rows
+  // onto the subject card.
+  const subjectSeedCount = sections.length;
 
-  // parts[1..n] — one comp detail page each
+  // parts[1..n] — one comp detail page each.
+  //
+  // After anchor-splitting, a comp detail part looks like:
+  //   Line 0: "{address} - {property name}"
+  //   Line 1: rank (standalone, e.g. "1")
+  //   Line 2: "{city}, {state} - {neighborhood}"
+  //   ...
+  //   UNIT BREAKDOWN
+  //   ...unit rows...
+  //
+  // A continuation page (same comp's UNIT BREAKDOWN spilling to a second
+  // physical page) looks like:
+  //   Line 0: "UNIT BREAKDOWN CONTINUED" (or column header row)
+  //   ...unit rows...
+  // i.e. no rank anywhere in the first handful of lines.
+  //
+  // So: scan the first few lines for a standalone rank. If found, it's a
+  // comp page; otherwise merge unit-mix rows into the previous comp section.
   for (let i = 1; i < parts.length; i++) {
     const part = parts[i];
     const lines = part.split("\n");
 
-    // Line 0: rank number. Parts that don't open with a rank are either noise
-    // (e.g. the Photo Comparison page) or continuation pages — the same comp's
-    // UNIT BREAKDOWN spilled onto a second physical page, which reproduces the
-    // anchor but starts with the unit-mix column headers ("UnitsBedBath…")
-    // instead of a rank. Merge continuation unit-mix data into the previous
-    // section so Totals / All Studios / All 1 Beds etc. aren't lost.
-    if (!/^\d{1,2}$/.test((lines[0] ?? "").trim())) {
-      if (sections.length === 0) continue;
-      const hasContinuationRows =
-        /\$[\d,]+\s+\$\d+\.\d{2}/.test(part) ||
-        /\$[\d,]+\$\d+\.\d{2}/.test(part) ||
-        /All\s+(?:Studios?|1\s*Beds?|2\s*Beds?|3\s*Beds?)/i.test(part) ||
-        /^Totals?\b/im.test(part);
-      if (!hasContinuationRows) continue;
+    // Look for rank in the first 3 lines.
+    let rankLineIdx = -1;
+    for (let k = 0; k < Math.min(3, lines.length); k++) {
+      if (/^\d{1,2}$/.test((lines[k] ?? "").trim())) { rankLineIdx = k; break; }
+    }
+
+    if (rankLineIdx === -1) {
+      if (sections.length <= subjectSeedCount) continue;
+      // A genuine continuation page either says "UNIT BREAKDOWN [CONTINUED]"
+      // near the top, or its first line is the Totals column-header row /
+      // an "All X Beds" summary row. Anything else (PET POLICY, RECURRING
+      // EXPENSES, etc.) would otherwise pollute the last comp's unit mix.
+      const head = lines.slice(0, 4).join("\n");
+      const looksLikeUnitMixPage =
+        /UNIT\s+BREAKDOWN/i.test(head) ||
+        /^Totals\s+Avg\s+SF\s+Units/im.test(head) ||
+        /^All\s+(?:Studios?|\d\s*Beds?|One\s*Beds?|Two\s*Beds?|Three\s*Beds?)/im.test(head);
+      if (!looksLikeUnitMixPage) continue;
       const prev = sections[sections.length - 1];
       const cont = parseUnitMixLines(part.split("\n"));
       prev.unitTypes.push(...cont.unitTypes);
@@ -509,14 +549,14 @@ function parsePropertySections(fullText: string): PropertySection[] {
       continue;
     }
 
-    // Line 1: "{address} - {comp name}"
-    const addrNameLine = (lines[1] ?? "").trim();
+    // Address-name line sits just above the rank; city-state just below.
+    const addrNameLine = (lines[rankLineIdx - 1] ?? "").trim();
     const addrNameM = addrNameLine.match(/^(.+?)\s+-\s+(.+)$/);
     const address = addrNameM ? addrNameM[1].trim() : (addrNameLine || null);
     const propertyName = addrNameM ? addrNameM[2].trim() : "";
 
-    // Line 2: "{city}, {State}" (may continue with " - {neighborhood}")
-    const cityStateLine = (lines[2] ?? "").trim();
+    // "{city}, {State}" (may continue with " - {neighborhood}")
+    const cityStateLine = (lines[rankLineIdx + 1] ?? "").trim();
     const cityStateM = cityStateLine.match(/^([A-Za-z][A-Za-z ]*),\s*([A-Za-z]+)/);
     const city = cityStateM ? cityStateM[1].trim() : null;
     const state = cityStateM ? cityStateM[2].trim() : null;
@@ -532,17 +572,15 @@ function parsePropertySections(fullText: string): PropertySection[] {
     const totalUnits = sizeM ? num(sizeM[1]) : null;
     const stories = sizeM ? num(sizeM[2]) : null;
 
-    if (i === 1) {
-      console.log("[DEBUG comp1] headerText:", JSON.stringify(headerText.slice(0, 500)));
-      console.log("[DEBUG comp1] bodyText[:200]:", JSON.stringify(bodyText.slice(0, 200)));
-    }
-
     // CoStar detail sections always contain a line of the form "Year Built: Oct 2024"
     // (colon may or may not have a trailing space in PDF.js output). Match the full
     // line, then take the 4-digit year group. Search the whole part — the line can
     // land on either side of "UNIT BREAKDOWN" depending on PDF.js line grouping.
-    const yrM = part.match(/Year Built:\s*[A-Za-z]{3,9}\s+(\d{4})/);
+    const yrM = part.match(/Year Built:\s*(?:[A-Za-z]{3,9}\s+)?(\d{4})/);
     const yearBuilt = yrM ? parseInt(yrM[1], 10) : null;
+    // "Year Built: 1987 Renov 2010" or "Renovated 2010" → preserve renovation year.
+    const renovM = part.match(/Renov(?:ated)?\s+(\d{4})/i);
+    const renovYear = renovM ? parseInt(renovM[1], 10) : null;
 
     const sfM = headerText.match(/Avg\.\s*Unit Size:\s*([\d,]+)\s*SF/i);
     const avgUnitSF = sfM ? num(sfM[1]) : null;
@@ -572,11 +610,12 @@ function parsePropertySections(fullText: string): PropertySection[] {
     const { unitTypes, summaryRows, totalsRow } = parseUnitMixLines(bodyText.split("\n"));
 
     sections.push({
-      propertyName: propertyName || `Comp ${lines[0].trim()}`,
+      propertyName: propertyName || `Comp ${lines[rankLineIdx].trim()}`,
       address: address ?? null,
       city,
       state,
       yearBuilt,
+      renovYear,
       totalUnits,
       stories,
       avgUnitSF,
@@ -603,6 +642,8 @@ function parseOneSection(headerText: string, bodyText: string): PropertySection 
 
   const yrM = h.match(/Year Built:\s*([A-Za-z]+ \d{4}|\d{4})/i);
   const yearBuilt = yrM ? yr(yrM[1]) : null;
+  const renovM = h.match(/Renov(?:ated)?\s+(\d{4})/i);
+  const renovYear = renovM ? parseInt(renovM[1], 10) : null;
 
   const sfM = h.match(/Avg\.\s*Unit Size:\s*([\d,]+)\s*SF/i);
   const avgUnitSF = sfM ? num(sfM[1]) : null;
@@ -686,6 +727,7 @@ function parseOneSection(headerText: string, bodyText: string): PropertySection 
     city,
     state,
     yearBuilt,
+    renovYear,
     totalUnits,
     stories,
     avgUnitSF,
@@ -897,35 +939,14 @@ function assembleData(
   }
 
   // ── Match summary rows to detail sections ─────────────────────────
+  // CoStar emits comp detail pages in the same rank order as the summary
+  // table, so pair them positionally. Name-based scoring was unreliable:
+  // summary rawName is often the address line (not the property name), which
+  // made `scoreMatch` return 0 for most pairs and left detail fields blank.
   const nonSubjectSections = sections.filter((s) => s !== subjectSection);
-
-  function scoreMatch(row: SummaryRow, sec: PropertySection): number {
-    let score = 0;
-    const rn = row.rawName.toLowerCase().trim();
-    const sn = sec.propertyName.toLowerCase().trim();
-    if (rn === sn) score += 100;
-    else if (rn.includes(sn) || sn.includes(rn)) score += 60;
-    else {
-      const rw = new Set(rn.split(/\s+/).filter((w) => w.length > 2));
-      score += sn.split(/\s+/).filter((w) => w.length > 2 && rw.has(w)).length * 20;
-    }
-    if (row.totalUnits !== null && row.totalUnits === sec.totalUnits) score += 25;
-    if (row.yearBuilt !== null && row.yearBuilt === sec.yearBuilt) score += 15;
-    return score;
-  }
-
-  const usedSections = new Set<PropertySection>();
-  const matchedSections: (PropertySection | null)[] = summaryRows.map((row) => {
-    let best: PropertySection | null = null;
-    let bestScore = 0;
-    for (const sec of nonSubjectSections) {
-      if (usedSections.has(sec)) continue;
-      const s = scoreMatch(row, sec);
-      if (s > bestScore) { bestScore = s; best = sec; }
-    }
-    if (best) usedSections.add(best);
-    return best;
-  });
+  const matchedSections: (PropertySection | null)[] = summaryRows.map(
+    (_row, i) => nonSubjectSections[i] ?? null
+  );
 
   // ── Build CompSummary[] ───────────────────────────────────────────
   const comps: CompSummary[] = [];
@@ -944,6 +965,7 @@ function assembleData(
       city: subjectSection.city ?? "",
       state: subjectSection.state ?? "",
       yearBuilt: subjectSection.yearBuilt,
+      renovYear: subjectSection.renovYear,
       totalUnits: subjectSection.totalUnits ?? tot?.units ?? null,
       stories: subjectSection.stories,
       avgUnitSF: subjectSection.avgUnitSF ?? tot?.avgSF ?? null,
@@ -972,11 +994,14 @@ function assembleData(
 
     comps.push({
       rank: row.rank, isSubject: false,
-      name: row.rawName || sec?.propertyName || `Comp ${row.rank}`,
+      // Prefer the full name from the detail page — the summary-table rawName
+      // is often truncated with an ellipsis (e.g. "The Barrett at Chevy Cha …").
+      name: sec?.propertyName || row.rawName || `Comp ${row.rank}`,
       address: row.rawAddress || (sec?.address ?? ""),
       city: sec?.city ?? "",
       state: sec?.state ?? "",
       yearBuilt: row.yearBuilt ?? sec?.yearBuilt ?? null,
+      renovYear: sec?.renovYear ?? null,
       totalUnits: row.totalUnits ?? sec?.totalUnits ?? null,
       stories: sec?.stories ?? null,
       avgUnitSF: row.avgUnitSF ?? sec?.avgUnitSF ?? null,
@@ -1005,6 +1030,7 @@ function assembleData(
       isSubject,
       address: sec.address ?? undefined,
       yearBuilt: sec.yearBuilt,
+      renovYear: sec.renovYear,
       unitTypes: [
         ...sec.unitTypes,
         ...sec.summaryRows,
@@ -1017,9 +1043,24 @@ function assembleData(
   }
 
   const subjectDetail = subjectSection ? buildDetail(subjectSection, true) : null;
-  const compDetails: CompDetail[] = matchedSections
-    .map((sec) => (sec ? buildDetail(sec, false) : null))
-    .filter((d): d is CompDetail => d !== null);
+  // Keep compDetails aligned 1:1 with summaryRows so UnitMixDetail renders a
+  // card per comp. When a detail section is missing, synthesise a minimal
+  // CompDetail from the summary row so the card shows the correct name.
+  const compDetails: CompDetail[] = matchedSections.map((sec, i) => {
+    if (sec) return buildDetail(sec, false);
+    const row = summaryRows[i];
+    return {
+      propertyName: row.rawName || `Comp ${row.rank}`,
+      isSubject: false,
+      address: row.rawAddress || undefined,
+      yearBuilt: row.yearBuilt,
+      renovYear: null,
+      unitTypes: [],
+      amenities: {},
+      parking: null,
+      petPolicy: null,
+    };
+  });
 
   return {
     subjectProperty: subjectDetail,

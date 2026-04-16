@@ -50,6 +50,7 @@ export interface CompSummary {
   city: string;
   state: string;
   yearBuilt: number | null;
+  renovYear: number | null;
   totalUnits: number | null;
   stories: number | null;
   avgUnitSF: number | null;
@@ -95,6 +96,7 @@ export interface CompDetail {
   parking?: string | null;
   petPolicy?: string | null;
   yearBuilt?: number | null;
+  renovYear?: number | null;
   address?: string;
 }
 

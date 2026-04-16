@@ -77,7 +77,13 @@ export default function CompsSummaryTable({ data }: CompsSummaryTableProps) {
                   {comp.city ? `, ${comp.city}` : ""}
                 </div>
               </td>
-              <td className="text-center">{comp.yearBuilt || "—"}</td>
+              <td className="text-center">
+                {comp.yearBuilt
+                  ? comp.renovYear
+                    ? `${comp.yearBuilt} (Renov. ${comp.renovYear})`
+                    : comp.yearBuilt
+                  : "—"}
+              </td>
               <td className="text-center">{comp.totalUnits || "—"}</td>
               <td className="text-center">{comp.avgUnitSF || "—"}</td>
               <td className="text-center">

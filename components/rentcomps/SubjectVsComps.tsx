@@ -29,13 +29,15 @@ function DeltaCell({
   value,
   reference,
   format,
+  row,
 }: {
   value: number | null;
   reference: number | null;
-  format: (v: number | null) => string;
+  format: (v: number | null, row?: CompSummary) => string;
+  row?: CompSummary;
 }) {
   if (value == null || reference == null) {
-    return <td className="text-right font-mono text-gray-400">{format(value)}</td>;
+    return <td className="text-right font-mono text-gray-400">{format(value, row)}</td>;
   }
 
   const above = value > reference;
@@ -47,7 +49,7 @@ function DeltaCell({
         above ? "text-green-700 bg-green-50" : below ? "text-red-700 bg-red-50" : ""
       }`}
     >
-      {format(value)}
+      {format(value, row)}
     </td>
   );
 }
@@ -61,9 +63,14 @@ export default function SubjectVsComps({ data }: SubjectVsCompsProps) {
   const fields: Array<{
     key: keyof CompSummary;
     label: string;
-    format: (v: number | null) => string;
+    format: (v: number | null, row?: CompSummary) => string;
   }> = [
-    { key: "yearBuilt", label: "Year Built", format: (v) => String(v ?? "—") },
+    {
+      key: "yearBuilt",
+      label: "Year Built",
+      format: (v, row) =>
+        v ? (row?.renovYear ? `${v} (Renov. ${row.renovYear})` : String(v)) : "—",
+    },
     { key: "totalUnits", label: "Total Units", format: (v) => String(v ?? "—") },
     { key: "avgUnitSF", label: "Avg SF", format: (v) => String(v ?? "—") },
     { key: "rentPerSF", label: "Rent/SF", format: fmtSF },
@@ -100,7 +107,7 @@ export default function SubjectVsComps({ data }: SubjectVsCompsProps) {
               </td>
               {subject && (
                 <td className="text-right font-mono font-semibold bg-blue-50">
-                  {field.format(subject[field.key] as number | null)}
+                  {field.format(subject[field.key] as number | null, subject)}
                 </td>
               )}
               {comps.map((comp, cIdx) => (
@@ -109,6 +116,7 @@ export default function SubjectVsComps({ data }: SubjectVsCompsProps) {
                   value={comp[field.key] as number | null}
                   reference={subject ? (subject[field.key] as number | null) : null}
                   format={field.format}
+                  row={comp}
                 />
               ))}
             </tr>
